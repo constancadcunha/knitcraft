@@ -62,6 +62,10 @@ export function inferChartPalette(text: string): string[] {
   const main = inferMainColour(text, colours);
   const palette: string[] = [];
 
+  if (/van gogh|starry night|swirl|swirly|night sky/.test(motifText)) {
+    return ["#1d2f6f", "#ffd166", "#6aa6ff", "#ffffff", "#251a1c"];
+  }
+
   if (main) palette.push(main.hex);
   else if (/star|celestial|moon|sun|spark/.test(motifText) && /stripe|striped|stripes/.test(motifText)) palette.push("#ffffff");
   else if (/night|goth|dark|black/.test(motifText)) palette.push("#251a1c");
@@ -115,4 +119,8 @@ export function hasMotif(text: string, motif: "flower" | "heart" | "star" | "str
     case "diamond": return /argyle|diamond|fair isle|fairisle/.test(lower);
     case "speckle": return /speckle|speckled|dotted|dot|dots/.test(lower);
   }
+}
+
+export function hasStarryNight(text: string): boolean {
+  return /van gogh|starry night|swirl|swirly|night sky/.test(text.toLowerCase());
 }

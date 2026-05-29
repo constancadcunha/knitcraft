@@ -4,7 +4,7 @@ import { GARMENT_TEMPLATES } from "@/types";
 import { generateId } from "@/lib/id";
 import { getShapeKey, isActiveChartCell } from "@/lib/shapes";
 import { getAssemblyInstructions, getQuickReference } from "@/lib/projectGuides";
-import { extractNamedColours, hasMotif } from "@/lib/designIntent";
+import { extractNamedColours, hasMotif, hasStarryNight } from "@/lib/designIntent";
 import {
   buildGaugeTemplate,
   estimateSkeins,
@@ -120,7 +120,14 @@ function buildDesignedGrid(
     return grid;
   }
 
-  if (hasMotif(text, "star") && hasMotif(text, "stripe")) {
+  const imageReference = !!pattern.sourceImagePreview && !importedChart;
+  if (imageReference) {
+    drawImageReferenceLayout(grid, shapeKey, sectionName, w, h, chartColors, minRow, maxRow);
+  }
+
+  if (hasStarryNight(text)) {
+    drawStarryNight(grid, shapeKey, w, h, chartColors, minRow, maxRow);
+  } else if (hasMotif(text, "star") && hasMotif(text, "stripe")) {
     drawStarsAndStripes(grid, shapeKey, w, h, chartColors, colours, minRow, maxRow);
   } else if (motif !== null && !hasMotif(text, "flower") && !hasMotif(text, "heart") && !hasMotif(text, "star")) {
     for (let row = minRow; row < maxRow; row++) {
@@ -143,7 +150,7 @@ function buildDesignedGrid(
 
   if (hasMotif(text, "flower")) drawFlowerRepeats(grid, shapeKey, w, h, colours, text);
   if (hasMotif(text, "heart")) drawHeart(grid, shapeKey, w, h, colours[0]);
-  if (hasMotif(text, "star") && !hasMotif(text, "stripe")) drawStarRepeats(grid, shapeKey, w, h, colours[0], text);
+  if (hasMotif(text, "star") && !hasMotif(text, "stripe") && !hasStarryNight(text)) drawStarRepeats(grid, shapeKey, w, h, colours[0], text);
 
   if (isBand) addButtonMarkers(grid, w, h);
   return grid;
@@ -176,6 +183,102 @@ function pickDesignColours(text: string, seed: number, chartColors: string[]): n
 
 function hexEquals(a: string | undefined, b: string): boolean {
   return (a ?? "").toLowerCase() === b.toLowerCase();
+}
+
+function drawImageReferenceLayout(
+  grid: number[][],
+  shapeKey: string,
+  sectionName: string,
+  w: number,
+  h: number,
+  chartColors: string[],
+  minRow: number,
+  maxRow: number
+) {
+  const lower = sectionName.toLowerCase();
+  const isFrontLike = /front|body|sweater|pullover|hand|scarf|blanket|shawl|cloth|headband|leg warmer|cowl/.test(lower);
+  if (!isFrontLike || lower.includes("band") || lower.includes("collar") || lower.includes("cuff")) return;
+
+  const activeShape = shapeKey === "rect" ? undefined : shapeKey;
+  const light = findLightColorIndex(chartColors, 1);
+  const dark = findDarkColorIndex(chartColors, 2);
+  const accent = chartColors[3] ? 3 : dark;
+  const top = Math.max(minRow + 2, Math.round(h * 0.18));
+  const bandTop = Math.max(minRow + 4, Math.round(h * 0.48));
+  const bandBottom = Math.min(maxRow - 2, Math.round(h * 0.68));
+
+  for (let row = bandTop; row <= bandBottom; row++) {
+    for (let col = 0; col < w; col++) {
+      if (isActiveChartCell(activeShape, undefined, row, col, w, h)) grid[row][col] = light;
+    }
+  }
+
+  drawPixelMotif(grid, shapeKey, w, h, Math.round(w * 0.5), top, Math.max(3, Math.round(Math.min(w, h) / 18)), dark, light);
+  drawTextBars(grid, shapeKey, w, h, Math.round((bandTop + bandBottom) / 2), dark, accent);
+}
+
+function drawPixelMotif(
+  grid: number[][],
+  shapeKey: string,
+  w: number,
+  h: number,
+  cx: number,
+  cy: number,
+  size: number,
+  dark: number,
+  light: number
+) {
+  const activeShape = shapeKey === "rect" ? undefined : shapeKey;
+  const pattern = [
+    "0011100",
+    "0111110",
+    "1101011",
+    "1111111",
+    "1011101",
+    "0010100",
+  ];
+  const cell = Math.max(1, Math.round(size / 3));
+  const startRow = cy - Math.round((pattern.length * cell) / 2);
+  const startCol = cx - Math.round((pattern[0].length * cell) / 2);
+
+  pattern.forEach((line, pr) => {
+    [...line].forEach((char, pc) => {
+      if (char !== "1") return;
+      const fill = pr >= 2 && pr <= 4 && pc >= 2 && pc <= 4 ? light : dark;
+      for (let rr = 0; rr < cell; rr++) {
+        for (let cc = 0; cc < cell; cc++) {
+          const row = startRow + pr * cell + rr;
+          const col = startCol + pc * cell + cc;
+          if (inGrid(grid, row, col) && isActiveChartCell(activeShape, undefined, row, col, w, h)) grid[row][col] = fill;
+        }
+      }
+    });
+  });
+}
+
+function drawTextBars(
+  grid: number[][],
+  shapeKey: string,
+  w: number,
+  h: number,
+  centerRow: number,
+  dark: number,
+  accent: number
+) {
+  const activeShape = shapeKey === "rect" ? undefined : shapeKey;
+  const widths = [5, 3, 4, 5, 2, 4, 3, 5, 4, 2];
+  const total = widths.reduce((sum, value) => sum + value, 0) + (widths.length - 1) * 2;
+  let col = Math.max(2, Math.round((w - total) / 2));
+
+  widths.forEach((width, index) => {
+    const color = index === 5 ? accent : dark;
+    for (let row = centerRow - 1; row <= centerRow + 1; row++) {
+      for (let c = col; c < col + width; c++) {
+        if (inGrid(grid, row, c) && isActiveChartCell(activeShape, undefined, row, c, w, h)) grid[row][c] = color;
+      }
+    }
+    col += width + 2;
+  });
 }
 
 function drawHeart(grid: number[][], shapeKey: string, w: number, h: number, colorIndex: number) {
@@ -258,6 +361,78 @@ function drawStarsAndStripes(
   }
 }
 
+function drawStarryNight(
+  grid: number[][],
+  shapeKey: string,
+  w: number,
+  h: number,
+  chartColors: string[],
+  minRow: number,
+  maxRow: number
+) {
+  const activeShape = shapeKey === "rect" ? undefined : shapeKey;
+  const deepBlue = colorIndexForHex(chartColors, "#1d2f6f", 0);
+  const yellow = colorIndexForHex(chartColors, "#ffd166", 1);
+  const skyBlue = colorIndexForHex(chartColors, "#6aa6ff", 2);
+  const white = colorIndexForHex(chartColors, "#ffffff", 3);
+  const dark = colorIndexForHex(chartColors, "#251a1c", deepBlue);
+
+  for (let row = minRow; row < maxRow; row++) {
+    for (let col = 0; col < w; col++) {
+      if (!isActiveChartCell(activeShape, undefined, row, col, w, h)) continue;
+      grid[row][col] = deepBlue;
+      const waveA = Math.round(h * 0.22 + Math.sin(col / 7) * 4 + Math.sin(col / 17) * 5);
+      const waveB = Math.round(h * 0.42 + Math.sin(col / 6 + 1.4) * 4);
+      if (Math.abs(row - waveA) <= 1 || Math.abs(row - waveB) <= 1) grid[row][col] = skyBlue;
+      if (Math.abs(row - (waveA + 4)) <= 1 && col % 3 !== 0) grid[row][col] = white;
+    }
+  }
+
+  const stars = [
+    { cx: 0.18, cy: 0.22, r: 0.055 },
+    { cx: 0.38, cy: 0.31, r: 0.04 },
+    { cx: 0.62, cy: 0.2, r: 0.052 },
+    { cx: 0.78, cy: 0.38, r: 0.035 },
+  ];
+  stars.forEach((star) => drawStar(grid, shapeKey, w, h, Math.round(w * star.cx), Math.round(h * star.cy), Math.max(3, Math.round(Math.min(w, h) * star.r)), yellow));
+
+  drawSwirl(grid, shapeKey, w, h, Math.round(w * 0.48), Math.round(h * 0.43), Math.max(8, Math.round(Math.min(w, h) / 7)), yellow, skyBlue);
+
+  const hillTop = Math.round(h * 0.74);
+  for (let row = hillTop; row < maxRow; row++) {
+    for (let col = 0; col < w; col++) {
+      if (!isActiveChartCell(activeShape, undefined, row, col, w, h)) continue;
+      if (row > hillTop + Math.sin(col / 8) * 4) grid[row][col] = dark;
+    }
+  }
+}
+
+function drawSwirl(
+  grid: number[][],
+  shapeKey: string,
+  w: number,
+  h: number,
+  cx: number,
+  cy: number,
+  radius: number,
+  yellow: number,
+  blue: number
+) {
+  const activeShape = shapeKey === "rect" ? undefined : shapeKey;
+  for (let row = cy - radius; row <= cy + radius; row++) {
+    for (let col = cx - radius; col <= cx + radius; col++) {
+      if (!inGrid(grid, row, col) || !isActiveChartCell(activeShape, undefined, row, col, w, h)) continue;
+      const dx = col - cx;
+      const dy = row - cy;
+      const r = Math.sqrt(dx * dx + dy * dy);
+      if (r < 2 || r > radius) continue;
+      const theta = Math.atan2(dy, dx);
+      const spiral = ((theta + r / 3) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+      if (spiral < 0.45 || spiral > Math.PI * 2 - 0.45) grid[row][col] = r < radius * 0.58 ? yellow : blue;
+    }
+  }
+}
+
 function drawStar(
   grid: number[][],
   shapeKey: string,
@@ -288,6 +463,48 @@ function drawStar(
 function colorIndexForHex(chartColors: string[], hex: string, fallback: number): number {
   const index = chartColors.findIndex((color) => hexEquals(color, hex));
   return index >= 0 ? index : fallback;
+}
+
+function findLightColorIndex(chartColors: string[], fallback: number): number {
+  let best = fallback;
+  let bestScore = -1;
+  chartColors.forEach((hex, index) => {
+    if (index === 0) return;
+    const rgb = hexToRgb(hex);
+    if (!rgb) return;
+    const score = rgb[0] + rgb[1] + rgb[2];
+    if (score > bestScore) {
+      best = index;
+      bestScore = score;
+    }
+  });
+  return best;
+}
+
+function findDarkColorIndex(chartColors: string[], fallback: number): number {
+  let best = fallback;
+  let bestScore = Number.POSITIVE_INFINITY;
+  chartColors.forEach((hex, index) => {
+    if (index === 0) return;
+    const rgb = hexToRgb(hex);
+    if (!rgb) return;
+    const score = rgb[0] + rgb[1] + rgb[2];
+    if (score < bestScore) {
+      best = index;
+      bestScore = score;
+    }
+  });
+  return best;
+}
+
+function hexToRgb(hex: string): [number, number, number] | null {
+  const value = hex.replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(value)) return null;
+  return [
+    parseInt(value.slice(0, 2), 16),
+    parseInt(value.slice(2, 4), 16),
+    parseInt(value.slice(4, 6), 16),
+  ];
 }
 
 function drawFlowerRepeats(grid: number[][], shapeKey: string, w: number, h: number, colours: number[], text: string) {

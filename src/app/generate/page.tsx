@@ -94,6 +94,15 @@ function designTextForConfig(config: WizardConfig): string {
   ]);
 }
 
+function imageReferenceDescription(config: WizardConfig): string {
+  return designTextFromParts([
+    config.textDescription,
+    `uploaded ${config.garmentType.toLowerCase()} garment reference photo`,
+    "use the photo as inspiration for garment layout, colour-blocking, motif placement, ribbing, collar, cuffs, hem, and text or graphic placement",
+    "do not convert the whole photo or background into an intarsia chart",
+  ]);
+}
+
 export default function GeneratePage() {
   const router = useRouter();
   const { savePattern, saveChart } = useStore();
@@ -106,6 +115,7 @@ export default function GeneratePage() {
   const handleImageUpload = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const uploadMode = config.startingPoint === "chart" ? "chart" : "image";
     const reader = new FileReader();
     reader.onload = () => {
       const preview = reader.result as string;
@@ -113,9 +123,14 @@ export default function GeneratePage() {
         ...c,
         imageFile: file,
         imagePreview: preview,
-        startingPoint: c.startingPoint === "chart" ? "chart" : "image",
+        startingPoint: uploadMode,
       }));
-      imagePreviewToChart(preview, { maxWidth: 36, maxHeight: 48, maxColors: 8 })
+      imagePreviewToChart(preview, {
+        maxWidth: 36,
+        maxHeight: 48,
+        maxColors: 8,
+        crop: uploadMode === "chart" ? "none" : "garment",
+      })
         .then((chart) => {
           setConfig((c) => c.imagePreview === preview ? { ...c, selectedColors: chart.colors } : c);
         })
@@ -124,7 +139,7 @@ export default function GeneratePage() {
         });
     };
     reader.readAsDataURL(file);
-  }, []);
+  }, [config.startingPoint]);
 
   const handleGenerate = useCallback(async () => {
     setLoading(true);
@@ -134,11 +149,12 @@ export default function GeneratePage() {
     try {
       let imageBase64: string | undefined;
       let importedChart: ImportedChart | undefined;
-      if (config.imagePreview && (config.startingPoint === "image" || config.startingPoint === "chart")) {
+      if (config.imagePreview && config.startingPoint === "chart") {
         const chartFromImage = await imagePreviewToChart(config.imagePreview, {
           maxWidth: config.startingPoint === "chart" ? 90 : 72,
           maxHeight: config.startingPoint === "chart" ? 120 : 96,
           maxColors: Math.max(1, config.selectedColors.length || 8),
+          crop: "none",
         });
         importedChart = {
           ...chartFromImage,
@@ -148,6 +164,11 @@ export default function GeneratePage() {
       if (config.startingPoint === "image" && config.imageFile && config.imagePreview) {
         imageBase64 = config.imagePreview.split(",")[1];
       }
+
+      const textDescription =
+        config.startingPoint === "image"
+          ? imageReferenceDescription(config)
+          : config.textDescription || (config.startingPoint === "chart" ? `Imported chart for ${config.garmentType}` : undefined);
 
       const res = await fetch("/api/generate-pattern", {
         method: "POST",
@@ -159,6 +180,9 @@ export default function GeneratePage() {
           sizes: config.sizes,
           difficulty: config.difficulty,
           extraNotes: [
+            config.startingPoint === "image"
+              ? "Treat the uploaded image as a garment reference, not as a full-picture chart. Extract the garment silhouette, colour-blocking, ribbing, and motif placement."
+              : "",
             config.extraNotes,
             config.styleOption ? `Style option: ${config.styleOption}.` : "",
             config.stitchPreference ? `Preferred main stitch or fabric: ${config.stitchPreference}. Explain how this changes the finished fabric.` : "",
@@ -167,7 +191,7 @@ export default function GeneratePage() {
               : "Skip decorative ribbing unless the construction truly requires it.",
           ].filter(Boolean).join(" "),
           imageBase64,
-          textDescription: config.textDescription || (config.startingPoint === "chart" ? `Imported chart for ${config.garmentType}` : undefined),
+          textDescription,
         }),
       });
 
@@ -177,6 +201,7 @@ export default function GeneratePage() {
       const pattern = data.pattern as Pattern;
       pattern.sourceDescription = [
         pattern.sourceDescription,
+        config.startingPoint === "image" ? imageReferenceDescription(config) : "",
         config.textDescription,
         config.styleOption,
         config.stitchPreference,
@@ -377,8 +402,8 @@ function Step1({
           selected={config.startingPoint === "image"}
           onClick={() => setConfig((c) => ({ ...c, startingPoint: "image" }))}
           icon={<Camera size={22} />}
-          title="Image to chart"
-          desc="Turn a photo or sketch into chart cells"
+          title="Garment photo"
+          desc="Use a sweater/photo as construction inspiration"
         />
         <OptionCard
           selected={config.startingPoint === "chart"}

@@ -397,6 +397,9 @@ function buildFallbackPattern(params: GenerateParams): Pattern {
 
 function fallbackPatternName(params: GenerateParams): string {
   const text = `${params.textDescription ?? ""} ${params.extraNotes ?? ""}`.toLowerCase();
+  if (/van gogh|starry night|night sky|swirl|swirly/.test(text)) {
+    return `Starry Night ${params.garmentType} Draft`;
+  }
   if (/star|moon|celestial|spark/.test(text) && /stripe|striped|stripes/.test(text)) {
     return `Stars and Stripes ${params.garmentType} Draft`;
   }

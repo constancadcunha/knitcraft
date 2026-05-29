@@ -7,6 +7,7 @@ type ImageChartOptions = {
   maxWidth?: number;
   maxHeight?: number;
   maxColors?: number;
+  crop?: "none" | "garment";
 };
 
 export async function imagePreviewToChart(
@@ -31,9 +32,19 @@ export async function imagePreviewToChart(
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return { grid: [[0]], colors: ["#f5ede0"] };
 
+  const crop = options.crop ?? "none";
+  const source = crop === "garment"
+    ? {
+        x: Math.round(image.width * 0.1),
+        y: Math.round(image.height * 0.08),
+        w: Math.round(image.width * 0.8),
+        h: Math.round(image.height * 0.84),
+      }
+    : { x: 0, y: 0, w: image.width, h: image.height };
+
   ctx.fillStyle = "#f5ede0";
   ctx.fillRect(0, 0, width, height);
-  ctx.drawImage(image, 0, 0, width, height);
+  ctx.drawImage(image, source.x, source.y, source.w, source.h, 0, 0, width, height);
 
   const pixels = ctx.getImageData(0, 0, width, height).data;
   const buckets = new Map<string, { rgb: [number, number, number]; count: number }>();
