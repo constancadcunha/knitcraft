@@ -17,6 +17,14 @@ export default function SavedPage() {
   const [tab, setTab] = useState<Tab>("patterns");
   const { patterns, charts, deletePattern, deleteChart } = useStore();
 
+  // Charts tab only shows manually-created charts (not auto-generated from Pattern Studio)
+  const manualCharts = charts.filter((c) => !c.sourcePatternId);
+
+  // Count: each project group = 1, each loose chart = 1
+  const projectIds = new Set(manualCharts.filter((c) => c.projectId).map((c) => c.projectId!));
+  const looseCount = manualCharts.filter((c) => !c.projectId).length;
+  const chartDisplayCount = projectIds.size + looseCount;
+
   return (
     <div className="min-h-screen py-8 px-4">
       <div className="max-w-5xl mx-auto">
@@ -32,12 +40,12 @@ export default function SavedPage() {
             Patterns ({patterns.length})
           </TabButton>
           <TabButton active={tab === "charts"} onClick={() => setTab("charts")} icon={<LayoutGrid size={13} />}>
-            Charts ({charts.length})
+            Charts ({chartDisplayCount})
           </TabButton>
         </div>
 
         {tab === "patterns" && <PatternsTab patterns={patterns} onDelete={deletePattern} />}
-        {tab === "charts" && <ChartsTab charts={charts} onDelete={deleteChart} />}
+        {tab === "charts" && <ChartsTab charts={manualCharts} onDelete={deleteChart} />}
       </div>
     </div>
   );
@@ -77,13 +85,19 @@ function PatternsTab({ patterns, onDelete }: { patterns: Pattern[]; onDelete: (i
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
       {patterns.map((p) => (
-        <PatternCard key={p.id} pattern={p} onOpen={() => router.push(`/pattern/${p.id}`)} onDelete={() => onDelete(p.id)} />
+        <PatternCard
+          key={p.id}
+          pattern={p}
+          onOpen={() => router.push(p.firstChartId ? `/chart/${p.firstChartId}` : `/pattern/${p.id}`)}
+          onOpenText={() => router.push(`/pattern/${p.id}`)}
+          onDelete={() => onDelete(p.id)}
+        />
       ))}
     </div>
   );
 }
 
-function PatternCard({ pattern, onOpen, onDelete }: { pattern: Pattern; onOpen: () => void; onDelete: () => void }) {
+function PatternCard({ pattern, onOpen, onOpenText, onDelete }: { pattern: Pattern; onOpen: () => void; onOpenText: () => void; onDelete: () => void }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const totalRows = pattern.sections.reduce((acc, s) => acc + s.instructions.length, 0);
@@ -92,6 +106,7 @@ function PatternCard({ pattern, onOpen, onDelete }: { pattern: Pattern; onOpen: 
   );
   const progress = totalRows > 0 ? Math.round((completedRowsCount / totalRows) * 100) : 0;
   const currentSection = pattern.sections[pattern.currentSection ?? 0];
+  const hasChartTracker = !!pattern.firstChartId;
 
   return (
     <div className="glass rounded-2xl border border-white/60 shadow-md overflow-hidden card-lift flex flex-col">
@@ -127,6 +142,13 @@ function PatternCard({ pattern, onOpen, onDelete }: { pattern: Pattern; onOpen: 
             style={{ background: "linear-gradient(135deg, #8b6347, #6e4e38)" }}>
             Continue <ArrowRight size={12} />
           </button>
+          {hasChartTracker && (
+            <button onClick={onOpenText}
+              className="px-3 py-2 glass border border-[#e2d0bb]/60 text-[#8b6347] text-xs font-semibold rounded-xl transition-all hover:bg-white/60"
+              title="View pattern text">
+              <Pencil size={13} />
+            </button>
+          )}
           {!confirmDelete ? (
             <button onClick={() => setConfirmDelete(true)}
               className="px-3 py-2 border border-[#e2d0bb]/60 rounded-xl text-xs text-[#c4a07e] hover:bg-red-50 hover:text-red-400 hover:border-red-200 transition-colors">
@@ -179,15 +201,18 @@ function ChartsTab({ charts, onDelete }: { charts: SavedChart[]; onDelete: (id: 
     <div className="space-y-5">
       {projectGroups.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {projectGroups.map((group) => (
-            <ChartProjectCard
-              key={group[0].projectId}
-              charts={group}
-              onOpen={() => router.push(`/chart/${group[0].id}`)}
-              onEdit={() => router.push(`/chart-editor?load=${group[0].id}`)}
-              onDelete={() => group.forEach((chart) => onDelete(chart.id))}
-            />
-          ))}
+          {projectGroups.map((group) => {
+            const editableChart = group.find((chart) => chart.sectionRole === "chart") ?? group[0];
+            return (
+              <ChartProjectCard
+                key={group[0].projectId}
+                charts={group}
+                onOpen={() => router.push(`/chart/${group[0].id}`)}
+                onEdit={() => router.push(`/chart-editor?load=${editableChart.id}`)}
+                onDelete={() => group.forEach((chart) => onDelete(chart.id))}
+              />
+            );
+          })}
         </div>
       )}
 

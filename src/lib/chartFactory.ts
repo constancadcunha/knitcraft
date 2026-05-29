@@ -1,12 +1,15 @@
 import type { Pattern, QuickReferenceGroup, SavedChart } from "@/types";
+import type { ImportedChart } from "@/lib/imageChart";
 import { GARMENT_TEMPLATES } from "@/types";
 import { generateId } from "@/lib/id";
 import { getShapeKey, isActiveChartCell } from "@/lib/shapes";
 import { getAssemblyInstructions, getQuickReference } from "@/lib/projectGuides";
+import { extractNamedColours, hasMotif } from "@/lib/designIntent";
 import {
   buildGaugeTemplate,
   estimateSkeins,
   GARMENT_SIZES,
+  getStitchGraph,
   getRibbingReference,
   type GarmentSize,
   SIZE_H_SCALE,
@@ -23,11 +26,23 @@ export function makeGrid(w: number, h: number): number[][] {
   return Array.from({ length: h }, () => Array(w).fill(0));
 }
 
+function isRibbingEligible(sectionName: string): boolean {
+  return /back|front|sleeve|brim|cuff|band|collar|neck|pocket/i.test(sectionName);
+}
+
+function isRibbingMarker(colorIndex: number): boolean {
+  return colorIndex === 6;
+}
+
+function isNotionMarker(colorIndex: number): boolean {
+  return colorIndex === 9;
+}
+
 export function buildStarterGrid(sectionName: string, w: number, h: number, includeRibbing: boolean): number[][] {
   const grid = makeGrid(w, h);
   const lower = sectionName.toLowerCase();
   const ribRows = Math.min(h, Math.max(4, Math.round(h * 0.08)));
-  const isBody = /back|front|sleeve|brim|cuff|scarf|blanket|shawl/i.test(sectionName);
+  const isBody = /back|front|sleeve|brim|cuff/i.test(sectionName);
   const isPocket = lower.includes("pocket");
   const isBand = lower.includes("button band");
   const isCollar = lower.includes("collar") || lower.includes("neck");
@@ -77,73 +92,90 @@ function buildDesignedGrid(
   sectionName: string,
   w: number,
   h: number,
-  includeRibbing: boolean
+  includeRibbing: boolean,
+  chartColors: string[],
+  importedChart?: ImportedChart
 ): number[][] {
   const grid = buildStarterGrid(sectionName, w, h, includeRibbing);
   const shapeKey = getShapeKey(garmentKey, sectionName);
-  const text = `${pattern.name} ${pattern.garmentType} ${pattern.sourceDescription ?? ""} ${pattern.notes ?? ""}`.toLowerCase();
+  const text = `${pattern.sourceDescription ?? ""} ${pattern.name}`.toLowerCase();
   const seed = hashText(`${text} ${pattern.sourceImagePreview?.slice(0, 800) ?? ""} ${sectionName}`);
   const lower = sectionName.toLowerCase();
-  const decorative = /back|front|sleeve|body|scarf|shawl|blanket|pocket/i.test(sectionName);
   const isBand = lower.includes("button band");
   const isCollar = lower.includes("collar") || lower.includes("neck");
+  const decorative = !isBand;
   if (!decorative && !isCollar && !isBand) return grid;
 
-  const ribStart = includeRibbing && decorative ? h - Math.min(h, Math.max(4, Math.round(h * 0.08))) : h;
+  const ribStart = includeRibbing && isRibbingEligible(sectionName)
+    ? h - Math.min(h, Math.max(4, Math.round(h * 0.08)))
+    : h;
   const minRow = isCollar ? 0 : Math.max(2, Math.round(h * 0.08));
   const maxRow = Math.max(minRow, ribStart - 2);
-  const colours = pickDesignColours(text, seed);
-  const motif = chooseMotif(text, seed);
+  const colours = pickDesignColours(text, seed, chartColors);
+  const motif = chooseMotif(text);
 
-  for (let row = minRow; row < maxRow; row++) {
-    for (let col = 0; col < w; col++) {
-      if (!isActiveChartCell(shapeKey === "rect" ? undefined : shapeKey, undefined, row, col, w, h)) continue;
-      const normalizedRow = row - minRow;
-      const band = Math.floor((normalizedRow + seed) / Math.max(4, Math.round(h / 14)));
-      if (motif === "stripes" && (normalizedRow + seed) % 12 < 4) grid[row][col] = colours[band % colours.length];
-      if (motif === "checker" && (Math.floor(col / 5) + Math.floor(normalizedRow / 5) + seed) % 2 === 0) grid[row][col] = colours[(band + col) % colours.length];
-      if (motif === "waves" && Math.abs((col + Math.round(Math.sin(normalizedRow / 4) * 8)) % 18 - 9) < 2) grid[row][col] = colours[(band + 1) % colours.length];
-      if (motif === "diamonds") {
-        const period = Math.max(10, Math.round(w / 4));
-        const dist = Math.abs(((col + seed) % period) - period / 2) + Math.abs((normalizedRow % period) - period / 2);
-        if (dist < period * 0.18) grid[row][col] = colours[(band + 2) % colours.length];
+  if (importedChart?.grid.length) {
+    applyImportedChart(grid, shapeKey, w, h, importedChart, minRow, maxRow);
+    if (isBand) addButtonMarkers(grid, w, h);
+    return grid;
+  }
+
+  if (hasMotif(text, "star") && hasMotif(text, "stripe")) {
+    drawStarsAndStripes(grid, shapeKey, w, h, chartColors, colours, minRow, maxRow);
+  } else if (motif !== null && !hasMotif(text, "flower") && !hasMotif(text, "heart") && !hasMotif(text, "star")) {
+    for (let row = minRow; row < maxRow; row++) {
+      for (let col = 0; col < w; col++) {
+        if (!isActiveChartCell(shapeKey === "rect" ? undefined : shapeKey, undefined, row, col, w, h)) continue;
+        const normalizedRow = row - minRow;
+        const band = Math.floor((normalizedRow + seed) / Math.max(4, Math.round(h / 14)));
+        if (motif === "stripes" && (normalizedRow + seed) % 12 < 4) grid[row][col] = colours[band % colours.length];
+        if (motif === "checker" && (Math.floor(col / 5) + Math.floor(normalizedRow / 5) + seed) % 2 === 0) grid[row][col] = colours[(band + col) % colours.length];
+        if (motif === "waves" && Math.abs((col + Math.round(Math.sin(normalizedRow / 4) * 8)) % 18 - 9) < 2) grid[row][col] = colours[(band + 1) % colours.length];
+        if (motif === "diamonds") {
+          const period = Math.max(10, Math.round(w / 4));
+          const dist = Math.abs(((col + seed) % period) - period / 2) + Math.abs((normalizedRow % period) - period / 2);
+          if (dist < period * 0.18) grid[row][col] = colours[(band + 2) % colours.length];
+        }
+        if (motif === "speckles" && hashText(`${seed}:${row}:${col}`) % 31 < 3) grid[row][col] = colours[hashText(`${row}:${col}`) % colours.length];
       }
-      if (motif === "speckles" && hashText(`${seed}:${row}:${col}`) % 31 < 3) grid[row][col] = colours[hashText(`${row}:${col}`) % colours.length];
     }
   }
 
-  if (/heart|love|sweet|valentine/i.test(text)) drawHeart(grid, shapeKey, w, h, colours[0]);
-  else if (/star|celestial|night|moon|spark/i.test(text)) drawStar(grid, shapeKey, w, h, colours[0]);
-  else if (/flower|floral|daisy|rose|garden|bloom/i.test(text)) drawFlowerRepeats(grid, shapeKey, w, h, colours);
-  else if (!/stripe|check|plaid|argyle|wave|diamond/i.test(text)) drawCenterBadge(grid, shapeKey, w, h, colours[0], seed);
+  if (hasMotif(text, "flower")) drawFlowerRepeats(grid, shapeKey, w, h, colours, text);
+  if (hasMotif(text, "heart")) drawHeart(grid, shapeKey, w, h, colours[0]);
+  if (hasMotif(text, "star") && !hasMotif(text, "stripe")) drawStarRepeats(grid, shapeKey, w, h, colours[0], text);
 
   if (isBand) addButtonMarkers(grid, w, h);
   return grid;
 }
 
-function chooseMotif(text: string, seed: number): "stripes" | "checker" | "waves" | "diamonds" | "speckles" {
-  if (/stripe|ribbed|line/.test(text)) return "stripes";
-  if (/check|plaid|gingham/.test(text)) return "checker";
-  if (/wave|wavy|ocean/.test(text)) return "waves";
-  if (/argyle|diamond|fair isle|fairisle/.test(text)) return "diamonds";
-  return (["diamonds", "waves", "checker", "speckles"] as const)[seed % 4];
+function chooseMotif(text: string): "stripes" | "checker" | "waves" | "diamonds" | "speckles" | null {
+  if (hasMotif(text, "stripe")) return "stripes";
+  if (hasMotif(text, "checker")) return "checker";
+  if (hasMotif(text, "wave")) return "waves";
+  if (hasMotif(text, "diamond")) return "diamonds";
+  if (hasMotif(text, "speckle")) return "speckles";
+  return null;
 }
 
-function pickDesignColours(text: string, seed: number): number[] {
-  const picked: number[] = [];
-  const matches: Array<[RegExp, number]> = [
-    [/red|rose|pink|coral|warm/, 2],
-    [/green|sage|forest|olive/, 3],
-    [/purple|mauve|lavender/, 4],
-    [/black|charcoal|espresso|brown/, 5],
-    [/blue|navy|sky|denim/, 7],
-    [/yellow|gold|mustard|sun/, 8],
-    [/white|cream|ivory/, 9],
-  ];
-  for (const [regex, index] of matches) if (regex.test(text)) picked.push(index);
-  const fallback = [2, 3, 7, 8, 4, 5];
-  for (let i = 0; picked.length < 3; i++) picked.push(fallback[(seed + i) % fallback.length]);
-  return Array.from(new Set(picked)).slice(0, 4);
+function pickDesignColours(text: string, seed: number, chartColors: string[]): number[] {
+  const paletteSize = chartColors.length;
+  const maxIndex = Math.max(0, paletteSize - 1);
+  if (maxIndex === 0) return [0];
+
+  const named = extractNamedColours(text);
+  const picked = named
+    .map((colour) => chartColors.findIndex((hex) => hexEquals(hex, colour.hex)))
+    .filter((index) => index > 0);
+  const fallback = Array.from({ length: maxIndex }, (_, index) => index + 1);
+  for (let i = 0; picked.length < Math.min(4, maxIndex); i++) {
+    picked.push(fallback[(seed + i) % fallback.length]);
+  }
+  return Array.from(new Set(picked)).slice(0, Math.min(4, paletteSize));
+}
+
+function hexEquals(a: string | undefined, b: string): boolean {
+  return (a ?? "").toLowerCase() === b.toLowerCase();
 }
 
 function drawHeart(grid: number[][], shapeKey: string, w: number, h: number, colorIndex: number) {
@@ -162,49 +194,206 @@ function drawHeart(grid: number[][], shapeKey: string, w: number, h: number, col
   }
 }
 
-function drawStar(grid: number[][], shapeKey: string, w: number, h: number, colorIndex: number) {
-  const cx = Math.floor(w / 2);
-  const cy = Math.floor(h * 0.38);
-  const radius = Math.max(6, Math.floor(Math.min(w, h) / 7));
+function drawStarRepeats(grid: number[][], shapeKey: string, w: number, h: number, colorIndex: number, text: string) {
+  const large = /large|big|single|center|centre|middle/.test(text);
+  const stars = large
+    ? [{ cx: Math.round(w * 0.5), cy: Math.round(h * 0.4), radius: Math.max(6, Math.floor(Math.min(w, h) / 7)) }]
+    : Array.from({ length: 6 }, (_, index) => {
+        const col = index % 3;
+        const row = Math.floor(index / 3);
+        return {
+          cx: Math.round(w * (0.24 + col * 0.26)),
+          cy: Math.round(h * (0.25 + row * 0.26)),
+          radius: Math.max(4, Math.floor(Math.min(w, h) / 12)),
+        };
+      });
+
+  for (const star of stars) {
+    drawStar(grid, shapeKey, w, h, star.cx, star.cy, star.radius, colorIndex);
+  }
+}
+
+function drawStarsAndStripes(
+  grid: number[][],
+  shapeKey: string,
+  w: number,
+  h: number,
+  chartColors: string[],
+  motifColours: number[],
+  minRow: number,
+  maxRow: number
+) {
+  const red = colorIndexForHex(chartColors, "#d94b42", motifColours[0] ?? 1);
+  const blue = colorIndexForHex(chartColors, "#2c7be5", motifColours[1] ?? motifColours[0] ?? 1);
+  const white = colorIndexForHex(chartColors, "#ffffff", 0);
+  const activeShape = shapeKey === "rect" ? undefined : shapeKey;
+  const stripeHeight = Math.max(3, Math.round((maxRow - minRow) / 12));
+  const fieldW = Math.max(8, Math.round(w * 0.42));
+  const fieldH = Math.max(8, Math.round((maxRow - minRow) * 0.42));
+
+  for (let row = minRow; row < maxRow; row++) {
+    for (let col = 0; col < w; col++) {
+      if (!isActiveChartCell(activeShape, undefined, row, col, w, h)) continue;
+      const inStripe = Math.floor((row - minRow) / stripeHeight) % 2 === 0;
+      grid[row][col] = inStripe ? red : white;
+      if (row < minRow + fieldH && col < fieldW) grid[row][col] = blue;
+    }
+  }
+
+  const starRows = 4;
+  const starCols = 4;
+  for (let r = 0; r < starRows; r++) {
+    for (let c = 0; c < starCols; c++) {
+      drawStar(
+        grid,
+        shapeKey,
+        w,
+        h,
+        Math.round(fieldW * (0.18 + c * 0.2)),
+        minRow + Math.round(fieldH * (0.18 + r * 0.2)),
+        Math.max(2, Math.round(Math.min(fieldW, fieldH) / 16)),
+        white
+      );
+    }
+  }
+}
+
+function drawStar(
+  grid: number[][],
+  shapeKey: string,
+  w: number,
+  h: number,
+  cx: number,
+  cy: number,
+  radius: number,
+  colorIndex: number
+) {
+  const activeShape = shapeKey === "rect" ? undefined : shapeKey;
   for (let row = cy - radius; row <= cy + radius; row++) {
     for (let col = cx - radius; col <= cx + radius; col++) {
       const dx = Math.abs(col - cx);
       const dy = Math.abs(row - cy);
-      const inside = dx + dy < radius * 0.7 || dx < 2 || dy < 2 || Math.abs(dx - dy) < 2;
-      if (inside && inGrid(grid, row, col) && isActiveChartCell(shapeKey === "rect" ? undefined : shapeKey, undefined, row, col, w, h)) {
+      const centerDiamond = dx + dy <= radius * 0.55;
+      const topPoint = dy > radius * 0.25 && row < cy && dx <= Math.max(1, radius * 0.18);
+      const bottomPoint = dy > radius * 0.25 && row > cy && dx <= Math.max(1, radius * 0.18);
+      const sidePoint = dx > radius * 0.25 && dy <= Math.max(1, radius * 0.18);
+      const inside = centerDiamond || topPoint || bottomPoint || sidePoint;
+      if (inside && inGrid(grid, row, col) && isActiveChartCell(activeShape, undefined, row, col, w, h)) {
         grid[row][col] = colorIndex;
       }
     }
   }
 }
 
-function drawFlowerRepeats(grid: number[][], shapeKey: string, w: number, h: number, colours: number[]) {
-  const stepX = Math.max(12, Math.round(w / 4));
-  const stepY = Math.max(12, Math.round(h / 7));
-  for (let cy = Math.round(h * 0.18); cy < h * 0.82; cy += stepY) {
-    for (let cx = Math.round(w * 0.18); cx < w * 0.86; cx += stepX) {
-      const colorIndex = colours[(cx + cy) % colours.length];
-      for (const [dr, dc] of [[0, 0], [-2, 0], [2, 0], [0, -2], [0, 2], [-1, -1], [1, 1]]) {
-        const row = cy + dr;
-        const col = cx + dc;
-        if (inGrid(grid, row, col) && isActiveChartCell(shapeKey === "rect" ? undefined : shapeKey, undefined, row, col, w, h)) {
-          grid[row][col] = colorIndex;
-        }
-      }
+function colorIndexForHex(chartColors: string[], hex: string, fallback: number): number {
+  const index = chartColors.findIndex((color) => hexEquals(color, hex));
+  return index >= 0 ? index : fallback;
+}
+
+function drawFlowerRepeats(grid: number[][], shapeKey: string, w: number, h: number, colours: number[], text: string) {
+  const large = /large|big|single|center|centre|middle/.test(text);
+  const petal = colours[0] ?? 1;
+  const centre = colours[1] ?? petal;
+  const leaf = colours[2] ?? colours[1] ?? petal;
+  const flowers = large
+    ? [{ cx: Math.round(w * 0.5), cy: Math.round(h * 0.42), size: Math.max(5, Math.round(Math.min(w, h) / 9)) }]
+    : Array.from({ length: 9 }, (_, index) => {
+        const col = index % 3;
+        const row = Math.floor(index / 3);
+        return {
+          cx: Math.round(w * (0.22 + col * 0.28)),
+          cy: Math.round(h * (0.2 + row * 0.23)),
+          size: Math.max(3, Math.round(Math.min(w, h) / 18)),
+        };
+      });
+
+  for (const flower of flowers) {
+    drawFlower(grid, shapeKey, w, h, flower.cx, flower.cy, flower.size, petal, centre, leaf);
+  }
+}
+
+function drawFlower(
+  grid: number[][],
+  shapeKey: string,
+  w: number,
+  h: number,
+  cx: number,
+  cy: number,
+  size: number,
+  petal: number,
+  centre: number,
+  leaf: number
+) {
+  const activeShape = shapeKey === "rect" ? undefined : shapeKey;
+  for (let row = cy - size * 3; row <= cy + size * 4; row++) {
+    for (let col = cx - size * 3; col <= cx + size * 3; col++) {
+      if (!inGrid(grid, row, col) || !isActiveChartCell(activeShape, undefined, row, col, w, h)) continue;
+      const dx = col - cx;
+      const dy = row - cy;
+      const petalShape =
+        dist(dx, dy + size) <= size * 1.15 ||
+        dist(dx, dy - size) <= size * 1.15 ||
+        dist(dx + size, dy) <= size * 1.15 ||
+        dist(dx - size, dy) <= size * 1.15;
+      const centreShape = dist(dx, dy) <= Math.max(1.6, size * 0.55);
+      const stemShape = Math.abs(dx) <= Math.max(1, Math.round(size * 0.18)) && dy > size * 1.1 && dy < size * 4;
+      const leafShape =
+        (dy > size * 2 && Math.abs(dx - size * 0.8) + Math.abs(dy - size * 2.7) < size * 1.2) ||
+        (dy > size * 2.4 && Math.abs(dx + size * 0.8) + Math.abs(dy - size * 3.1) < size * 1.2);
+      if (stemShape || leafShape) grid[row][col] = leaf;
+      if (petalShape) grid[row][col] = petal;
+      if (centreShape) grid[row][col] = centre;
     }
   }
 }
 
-function drawCenterBadge(grid: number[][], shapeKey: string, w: number, h: number, colorIndex: number, seed: number) {
-  const cx = Math.floor(w / 2);
-  const cy = Math.floor(h * 0.42);
-  const radius = Math.max(5, Math.floor(Math.min(w, h) / 9));
-  for (let row = cy - radius; row <= cy + radius; row++) {
-    for (let col = cx - radius; col <= cx + radius; col++) {
-      const dist = Math.abs(col - cx) + Math.abs(row - cy);
-      if ((dist < radius && (row + col + seed) % 3 !== 0) && inGrid(grid, row, col) && isActiveChartCell(shapeKey === "rect" ? undefined : shapeKey, undefined, row, col, w, h)) {
-        grid[row][col] = colorIndex;
-      }
+function dist(dx: number, dy: number) {
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function applyImportedChart(
+  grid: number[][],
+  shapeKey: string,
+  w: number,
+  h: number,
+  importedChart: ImportedChart,
+  minRow: number,
+  maxRow: number
+) {
+  const activeShape = shapeKey === "rect" ? undefined : shapeKey;
+  const sourceH = importedChart.grid.length;
+  const sourceW = importedChart.grid[0]?.length ?? 0;
+  if (!sourceW || !sourceH) return;
+
+  let top = h;
+  let bottom = -1;
+  let left = w;
+  let right = -1;
+
+  for (let row = minRow; row < maxRow; row++) {
+    for (let col = 0; col < w; col++) {
+      if (!isActiveChartCell(activeShape, undefined, row, col, w, h)) continue;
+      top = Math.min(top, row);
+      bottom = Math.max(bottom, row);
+      left = Math.min(left, col);
+      right = Math.max(right, col);
+    }
+  }
+
+  if (bottom < top || right < left) return;
+
+  for (let row = top; row <= bottom; row++) {
+    for (let col = left; col <= right; col++) {
+      if (!isActiveChartCell(activeShape, undefined, row, col, w, h)) continue;
+      const sourceRow = Math.min(
+        sourceH - 1,
+        Math.max(0, Math.floor(((row - top) / Math.max(1, bottom - top + 1)) * sourceH))
+      );
+      const sourceCol = Math.min(
+        sourceW - 1,
+        Math.max(0, Math.floor(((col - left) / Math.max(1, right - left + 1)) * sourceW))
+      );
+      grid[row][col] = importedChart.grid[sourceRow]?.[sourceCol] ?? 0;
     }
   }
 }
@@ -233,7 +422,7 @@ function hashText(value: string): number {
 
 export function createProjectChartsFromPattern(
   pattern: Pattern,
-  options: { includeRibbing: boolean }
+  options: { includeRibbing: boolean; colors?: string[]; importedChart?: ImportedChart }
 ): SavedChart[] {
   const projectId = generateId();
   const size = normalizeSize(pattern.currentSize || pattern.sizes[0]);
@@ -245,11 +434,16 @@ export function createProjectChartsFromPattern(
   const sectionCount = sections.length + 3;
   const assemblyInstructions = getAssemblyInstructions(garmentKey);
   const quickReference = getQuickReference(pattern.craftType, garmentKey);
+  const chartColors = options.colors?.length
+    ? options.colors
+    : options.importedChart?.colors?.length
+      ? options.importedChart.colors
+      : DEFAULT_CHART_COLORS;
 
   const chartSections = sections.map((section, index): SavedChart => {
     const w = Math.max(1, Math.round(section.w * SIZE_W_SCALE[size]));
     const h = Math.max(1, Math.round(section.h * SIZE_H_SCALE[size]));
-    const grid = buildDesignedGrid(pattern, garmentKey, section.name, w, h, options.includeRibbing);
+    const grid = buildDesignedGrid(pattern, garmentKey, section.name, w, h, options.includeRibbing, chartColors, options.importedChart);
     const shapeKey = getShapeKey(garmentKey, section.name);
     return {
       id: generateId(),
@@ -257,9 +451,9 @@ export function createProjectChartsFromPattern(
       width: w,
       height: h,
       cells: grid.map((row) => row.map((colorIndex) => ({ colorIndex }))),
-      colors: DEFAULT_CHART_COLORS,
+      colors: chartColors,
       createdAt,
-      thumbnail: chartGridPreview(grid, DEFAULT_CHART_COLORS),
+      thumbnail: chartGridPreview(grid, chartColors),
       completedCells: {},
       shapeKey: shapeKey && shapeKey !== "rect" ? shapeKey : undefined,
       projectId,
@@ -438,7 +632,7 @@ function makeGuideChart(input: {
     sectionCount: input.sectionCount,
     sectionRole: input.role,
     guideGroups: input.guideGroups,
-    sourcePatternId: input.pattern.id,
+    sourcePatternId: input.pattern.id !== input.projectId ? input.pattern.id : undefined,
     assemblyInstructions: getAssemblyInstructions(input.pattern.garmentType),
     quickReference: getQuickReference(input.pattern.craftType, input.pattern.garmentType),
   };
@@ -545,6 +739,9 @@ function buildShoppingGroups(
 
 function buildStartGroups(pattern: Pattern, size: GarmentSize, includeRibbing: boolean): QuickReferenceGroup[] {
   const startTitle = pattern.craftType === "crocheting" ? "Foundation row" : "Cast on";
+  const startSlug = pattern.craftType === "crocheting" ? "foundation-chain" : "cast-on";
+  const startImage = graphImage(pattern.craftType, pattern.craftType === "crocheting" ? "single-crochet" : "knit");
+  const chartImage = graphImage(pattern.craftType, pattern.craftType === "crocheting" ? "single-crochet" : "stockinette");
   const startDetail = pattern.craftType === "crocheting"
     ? "Crochet starts with a foundation chain or foundation stitches. Chain loosely, then work Row 1 into the chain; do not use knitting cast-on language."
     : "Knitting starts by placing live stitches on the needle. Use the cast-on count listed for the section you are making; Row 1 is worked after those stitches are on the needle.";
@@ -553,13 +750,17 @@ function buildStartGroups(pattern: Pattern, size: GarmentSize, includeRibbing: b
     {
       title: "Start method",
       items: [
-        { title: startTitle, detail: startDetail },
-        { title: "Gauge swatch", detail: `Make a 4 in swatch in the main stitch before committing. The tracker uses ${size} as the chart size; change counts if your swatch differs.` },
-        { title: "Chart direction", detail: pattern.craftType === "knitting" ? "Flat knitting charts are worked bottom up. Right-side rows are usually read right to left as knit-facing stitches; wrong-side rows are usually left to right as purl-facing equivalents unless the pattern says otherwise." : "Crochet charts are worked bottom up unless marked as rounds. Read row direction from the chart arrows and turning notes." },
+        { title: startTitle, detail: startDetail, imageUrl: startImage, sourceUrl: `/learn#learn-${startSlug}` },
+        { title: "Gauge swatch", detail: `Make a 4 in swatch in the main stitch before committing. The tracker uses ${size} as the chart size; change counts if your swatch differs.`, sourceUrl: "/learn#learn-gauge-swatch" },
+        { title: "Chart direction", detail: pattern.craftType === "knitting" ? "Flat knitting charts are worked bottom up. Right-side rows are usually read right to left as knit-facing stitches; wrong-side rows are usually left to right as purl-facing equivalents unless the pattern says otherwise." : "Crochet charts are worked bottom up unless marked as rounds. Read row direction from the chart arrows and turning notes.", imageUrl: chartImage, sourceUrl: `/learn#learn-${pattern.craftType === "knitting" ? "reading-flat-charts" : "reading-crochet-charts"}` },
       ],
     },
     ...(includeRibbing ? [getRibbingReference(pattern.craftType)] : []),
   ];
+}
+
+function graphImage(craftType: Pattern["craftType"], id: string): string | undefined {
+  return getStitchGraph(craftType).find((entry) => entry.id === id)?.imageUrl;
 }
 
 function buildYarnShoppingList(
@@ -579,7 +780,8 @@ function buildYarnShoppingList(
     for (let row = 0; row < chart.height; row++) {
       for (let col = 0; col < chart.width; col++) {
         if (!isActiveChartCell(chart.shapeKey, chart.rowShaping, row, col, chart.width, chart.height)) continue;
-        const colorIndex = chart.cells[row]?.[col]?.colorIndex ?? 0;
+        const raw = chart.cells[row]?.[col]?.colorIndex ?? 0;
+        const colorIndex = isRibbingMarker(raw) || isNotionMarker(raw) ? 0 : raw;
         colorCounts.set(colorIndex, (colorCounts.get(colorIndex) ?? 0) + 1);
         totalCells++;
       }
@@ -608,8 +810,15 @@ function buildYarnShoppingList(
 
   return allocated.map((entry, index) => ({
     title: `${index === 0 ? "Main colour" : `Contrast colour ${index}`} - ${entry.skeins} skein${entry.skeins === 1 ? "" : "s"}`,
-    detail: `Chart colour ${entry.colorIndex + 1} (${DEFAULT_CHART_COLORS[entry.colorIndex] ?? "custom"}). This colour covers about ${Math.max(1, Math.round((entry.count / Math.max(1, totalCells)) * 100))}% of charted stitches. Buy the same dye lot when possible.`,
+    detail: `Chart colour ${entry.colorIndex + 1}. This colour covers about ${Math.max(1, Math.round((entry.count / Math.max(1, totalCells)) * 100))}% of charted stitches. Buy the same dye lot when possible.`,
+    colorHex:
+      chartSections.find((chart) => chart.colors[entryColorIndex(entry.colorIndex)])
+        ?.colors[entryColorIndex(entry.colorIndex)] ?? DEFAULT_CHART_COLORS[entry.colorIndex],
   }));
+}
+
+function entryColorIndex(colorIndex: number): number {
+  return isRibbingMarker(colorIndex) || isNotionMarker(colorIndex) ? 0 : colorIndex;
 }
 
 function buildFinishingGroups(garmentType: string, craftType: Pattern["craftType"]): QuickReferenceGroup[] {

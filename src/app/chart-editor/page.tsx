@@ -12,8 +12,38 @@ import { buildGaugeTemplate, GARMENT_SIZES, type GarmentSize, gaugeForCraft, SIZ
 import { buildStarterGrid, createProjectGuideCharts, DEFAULT_CHART_COLORS, makeGrid } from "@/lib/chartFactory";
 import {
   Pencil, Eraser, PaintBucket, Undo2, Trash2, Download, Save,
-  ArrowLeft, ChevronRight, Check, Play,
+  ArrowLeft, ChevronRight, Check, Play, Plus, X, LayoutGrid,
 } from "lucide-react";
+
+function GarmentIconSmall({ type, active }: { type: string; active: boolean }) {
+  const c = active ? "#8b6347" : "#c4a07e";
+  const fo = active ? "0.18" : "0.1";
+  const sw = "1.8";
+  switch (type) {
+    case "Sweater":
+      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><path d="M14 5 Q15 11 20 11 Q25 11 26 5 L32 7.5 L37 21 L30 21 L30 34 L10 34 L10 21 L3 21 L8 7.5 Z" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/></svg>;
+    case "Cardigan":
+      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><path d="M14 5 L8 7.5 L3 21 L10 21 L10 34 L19.5 34 L19.5 11" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/><path d="M26 5 L32 7.5 L37 21 L30 21 L30 34 L20.5 34 L20.5 11" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/><line x1="20" y1="11" x2="20" y2="34" stroke={c} strokeWidth="1" strokeDasharray="2 1.5"/></svg>;
+    case "Hat": case "Hat / Beanie":
+      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><path d="M9 27 C9 16 31 16 31 27 Z" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/><rect x="7" y="26" width="26" height="5" rx="2.5" fill={c} fillOpacity="0.2" stroke={c} strokeWidth={sw}/></svg>;
+    case "Scarf":
+      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><rect x="14" y="3" width="12" height="30" rx="6" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw}/></svg>;
+    case "Socks":
+      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><path d="M15 4 L15 22 Q15 30 25 30 Q33 30 33 23 Q33 19 27 19 L25 19 L25 4 Z" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/></svg>;
+    case "Mittens":
+      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><path d="M10 30 L10 14 Q10 7 15 7 Q20 7 20 14 L20 30 Z" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/><path d="M20 17 Q22 13 25 14 Q28 15 25 19 L20 21" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/></svg>;
+    case "Shawl":
+      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><path d="M20 6 L4 31 L36 31 Z" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/></svg>;
+    case "Baby Blanket": case "Throw Blanket":
+      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><rect x="4" y="4" width="32" height="28" rx="3" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw}/><line x1="4" y1="13" x2="36" y2="13" stroke={c} strokeWidth="0.8" strokeDasharray="3 2"/><line x1="4" y1="22" x2="36" y2="22" stroke={c} strokeWidth="0.8" strokeDasharray="3 2"/></svg>;
+    case "Cowl":
+      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><ellipse cx="20" cy="18" rx="14" ry="11" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw}/><ellipse cx="20" cy="18" rx="8" ry="6" fill="white" stroke={c} strokeWidth={sw}/></svg>;
+    case "Vest":
+      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><path d="M13 5 Q14 10 20 10 Q26 10 27 5 L32 10 L30 34 L10 34 L8 10 Z" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/></svg>;
+    default:
+      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><rect x="6" y="6" width="28" height="24" rx="5" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeDasharray="4 2"/></svg>;
+  }
+}
 
 const CELL_SIZE = 16;
 const MIN_GRID = 5;
@@ -70,11 +100,19 @@ function ChartEditorContent() {
   const [templateSection, setTemplateSection] = useState(0);
   const [templateSize, setTemplateSize] = useState<GarmentSize>("L");
   const [templateMsg, setTemplateMsg] = useState<string | null>(null);
-  const [includeRibbing, setIncludeRibbing] = useState(true);
+  const [includeRibbing, setIncludeRibbing] = useState(false);
   const [currentShapeKey, setCurrentShapeKey] = useState<string | undefined>(undefined);
   const [rowShaping, setRowShaping] = useState<RowShaping | undefined>(undefined);
   const [shapingRow, setShapingRow] = useState(0);
   const [sectionDrafts, setSectionDrafts] = useState<Record<number, SectionDraft>>({});
+
+  // Setup wizard state
+  const [setupComplete, setSetupComplete] = useState(false);
+  const [customSections, setCustomSections] = useState<{ name: string; w: number; h: number }[]>([]);
+  const [showAddSection, setShowAddSection] = useState(false);
+  const [newSecName, setNewSecName] = useState("");
+  const [newSecW, setNewSecW] = useState(30);
+  const [newSecH, setNewSecH] = useState(40);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const colorInputRef = useRef<HTMLInputElement>(null);
@@ -87,6 +125,13 @@ function ChartEditorContent() {
   const templates = useMemo(() => buildGaugeTemplate(craftType), [craftType]);
   const activeTemplates = useMemo(() => ({ ...GARMENT_TEMPLATES, ...templates }), [templates]);
   const activeGauge = gaugeForCraft(craftType);
+
+  // Sections for the current project including any user-added custom ones
+  const projectSections = useMemo(() => {
+    const base = templateKey ? (activeTemplates[templateKey]?.sections ?? []) : [];
+    const scaled = customSections.map(s => ({ name: s.name, w: s.w, h: s.h }));
+    return [...base, ...scaled];
+  }, [templateKey, activeTemplates, customSections]);
 
   const isCellActive = useCallback(
     (row: number, col: number, width = gridW, height = gridH) =>
@@ -323,7 +368,7 @@ function ChartEditorContent() {
       garmentSize: pid ? templateSize : undefined,
       sectionName,
       sectionIndex,
-      sectionCount: garmentKey ? (activeTemplates[garmentKey]?.sections.length ?? 0) + 3 : undefined,
+      sectionCount: garmentKey ? projectSections.length + 3 : undefined,
       assemblyInstructions: garmentKey ? getAssemblyInstructions(garmentKey) : undefined,
       quickReference: garmentKey ? getQuickReference(craftType, garmentKey) : undefined,
       includeRibbing,
@@ -333,7 +378,7 @@ function ChartEditorContent() {
   const handleSave = (): string => {
     const canvas = canvasRef.current;
     const thumbnail = canvas?.toDataURL("image/png");
-    const sectionName = templateKey ? activeTemplates[templateKey]?.sections[templateSection]?.name : undefined;
+    const sectionName = templateKey ? projectSections[templateSection]?.name : undefined;
     const existingSection = templateKey && projectId && sectionName
       ? charts.find((c) => c.projectId === projectId && c.sectionName === sectionName)
       : undefined;
@@ -367,6 +412,13 @@ function ChartEditorContent() {
   };
 
   const handleSaveAndTrack = () => {
+    if (templateKey) {
+      const firstStepId = saveAllSections();
+      if (firstStepId) {
+        router.push(`/chart/${firstStepId}`);
+        return;
+      }
+    }
     const id = handleSave();
     router.push(`/chart/${id}`);
   };
@@ -380,7 +432,7 @@ function ChartEditorContent() {
       garmentType: chart.garmentType,
       garmentSize: chart.garmentSize,
       includeRibbing,
-      chartSectionCount: activeTemplates[templateKey]?.sections.length ?? 1,
+      chartSectionCount: projectSections.length || 1,
       chartSections: [
         ...charts.filter((c) => c.projectId === chart.projectId && c.sectionRole === "chart" && c.id !== chart.id),
         chart,
@@ -403,7 +455,7 @@ function ChartEditorContent() {
     setCurrentChartId(chart.id);
     setCurrentShapeKey(chart.shapeKey ?? undefined);
     setRowShaping(chart.rowShaping);
-    setIncludeRibbing(chart.includeRibbing ?? true);
+    setIncludeRibbing(chart.includeRibbing ?? false);
     setShapingRow(Math.max(0, chart.height - 1));
     setCraftType(chart.craftType ?? "knitting");
     setProjectId(chart.projectId ?? null);
@@ -430,7 +482,7 @@ function ChartEditorContent() {
     if (!loadId) return;
     const chart = charts.find((savedChart) => savedChart.id === loadId);
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (chart) loadChart(chart);
+    if (chart) { loadChart(chart); setSetupComplete(true); }
   }, [loadId, charts, loadChart]);
 
   const updateColor = (idx: number, value: string) => {
@@ -498,10 +550,11 @@ function ChartEditorContent() {
   };
 
   const applyTemplate = (key: string, sectionIdx: number, size: GarmentSize = templateSize) => {
-    const tpl = activeTemplates[key];
-    if (!tpl) return;
+    const sectionsForKey = key === templateKey ? projectSections : activeTemplates[key]?.sections;
+    if (!sectionsForKey?.length) return;
     rememberCurrentSection();
-    const sec = tpl.sections[sectionIdx];
+    const sec = sectionsForKey[sectionIdx];
+    if (!sec) return;
     const w = Math.round(sec.w * SIZE_W_SCALE[size]);
     const h = Math.round(sec.h * SIZE_H_SCALE[size]);
     const shapeKey = getShapeKey(key, sec.name);
@@ -529,10 +582,10 @@ function ChartEditorContent() {
     if (startingNewProject) setSectionDrafts({});
   };
 
-  const saveAllSections = () => {
+  const saveAllSections = (): string | null => {
     const garmentKey = templateKey;
-    const tpl = garmentKey ? activeTemplates[garmentKey] : null;
-    if (!tpl || !garmentKey) return;
+    const tpl = garmentKey ? { sections: projectSections } : null;
+    if (!tpl || !garmentKey) return null;
     const canvas = canvasRef.current;
     const currentSecName = tpl.sections[templateSection]?.name;
     const pid = ensureProject(garmentKey, templateSize) ?? generateId();
@@ -589,6 +642,7 @@ function ChartEditorContent() {
     setSectionDrafts(nextDrafts);
     setTemplateMsg(`${tpl.sections.length} section charts saved to one ${garmentKey} project`);
     setTimeout(() => setTemplateMsg(null), 4000);
+    return materialsChart.id;
   };
 
   const freehandWidthForRow = (row: number) => {
@@ -604,6 +658,273 @@ function ChartEditorContent() {
     { id: "eraser", icon: Eraser, label: "Eraser" },
     { id: "fill", icon: PaintBucket, label: "Fill" },
   ];
+
+  // Setup wizard
+  if (!setupComplete) {
+    const sections = templateKey ? activeTemplates[templateKey]?.sections ?? [] : [];
+    const allSections = [...sections.map(s => ({ ...s, custom: false })), ...customSections.map(s => ({ ...s, custom: true }))];
+
+    return (
+      <div className="min-h-screen py-8 px-4">
+        <div className="max-w-2xl mx-auto">
+          {/* Header */}
+          <div className="flex items-center gap-3 mb-8">
+            <Link href="/saved" className="p-2 rounded-xl glass border border-white/60 text-[#8b6347] hover:bg-white/80 transition-all">
+              <ArrowLeft size={18} />
+            </Link>
+            <div>
+              <h1 className="text-2xl font-bold text-[#2e1f14]" style={{ fontFamily: "var(--font-playfair), serif" }}>
+                New Chart Project
+              </h1>
+              <p className="text-sm text-[#8b6347]">Set up your project first, then focus on the design.</p>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-6">
+            {/* Step 1. Craft type */}
+            <div className="glass rounded-2xl border border-white/60 shadow-md p-5">
+              <h2 className="text-[11px] font-bold text-[#8b6347] uppercase tracking-widest mb-3">
+                1. Craft type
+              </h2>
+              <div className="grid grid-cols-2 gap-3">
+                {(["knitting", "crocheting"] as CraftType[]).map((ct) => (
+                  <button
+                    key={ct}
+                    onClick={() => setCraftType(ct)}
+                    className={`py-4 rounded-2xl text-sm font-bold capitalize transition-all border-2 flex items-center justify-center gap-2 ${
+                      craftType === ct
+                        ? "border-[#8b6347] bg-[#8b6347]/10 text-[#2e1f14] shadow-md"
+                        : "border-[#e2d0bb]/60 text-[#8b6347] hover:bg-white/60"
+                    }`}
+                  >
+                    {ct === "knitting" ? (
+                      <><svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="4" y1="16" x2="16" y2="4"/><line x1="4" y1="4" x2="16" y2="16"/><circle cx="4" cy="4" r="2" fill="currentColor" stroke="none"/><circle cx="16" cy="4" r="2" fill="currentColor" stroke="none"/></svg>Knitting</>
+                    ) : (
+                      <><svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 17 L13 5 Q16 2 17 5 Q18 7 14 9"/></svg>Crochet</>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Step 2. Garment type */}
+            <div className="glass rounded-2xl border border-white/60 shadow-md p-5">
+              <h2 className="text-[11px] font-bold text-[#8b6347] uppercase tracking-widest mb-3">
+                2. What are you making?
+              </h2>
+              <div className="grid grid-cols-4 gap-2.5 mb-3">
+                {Object.entries(activeTemplates).map(([key]) => (
+                  <button
+                    key={key}
+                    onClick={() => setTemplateKey(key)}
+                    className={`flex flex-col items-center gap-2 py-3 px-2 rounded-2xl border-2 transition-all ${
+                      templateKey === key
+                        ? "border-[#8b6347] bg-[#8b6347]/10 shadow-md scale-105"
+                        : "border-[#e2d0bb]/60 hover:bg-white/60"
+                    }`}
+                  >
+                    <div className="w-10 h-9">
+                      <GarmentIconSmall type={key} active={templateKey === key} />
+                    </div>
+                    <span className="text-[10px] font-semibold text-[#2e1f14] leading-tight text-center line-clamp-2">
+                      {key}
+                    </span>
+                  </button>
+                ))}
+                <button
+                  onClick={() => setTemplateKey(null)}
+                  className={`flex flex-col items-center gap-2 py-3 px-2 rounded-2xl border-2 transition-all ${
+                    templateKey === null
+                      ? "border-[#8b6347] bg-[#8b6347]/10 shadow-md scale-105"
+                      : "border-[#e2d0bb]/60 hover:bg-white/60"
+                  }`}
+                >
+                  <div className="w-10 h-9 flex items-center justify-center text-[#8b6347]">
+                    <LayoutGrid size={24} />
+                  </div>
+                  <span className="text-[10px] font-semibold text-[#2e1f14] leading-tight text-center">
+                    Freehand
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* Step 3. Size (garment only) */}
+            {templateKey && (
+              <div className="glass rounded-2xl border border-white/60 shadow-md p-5">
+                <h2 className="text-[11px] font-bold text-[#8b6347] uppercase tracking-widest mb-3">
+                  3. Size
+                </h2>
+                <div className="flex gap-2">
+                  {GARMENT_SIZES.map((sz) => (
+                    <button
+                      key={sz}
+                      onClick={() => setTemplateSize(sz)}
+                      className={`flex-1 py-3 rounded-2xl text-sm font-bold transition-all border-2 ${
+                        templateSize === sz
+                          ? "border-[#8b6347] bg-[#8b6347] text-white shadow-md"
+                          : "border-[#e2d0bb]/60 text-[#8b6347] hover:bg-white/60"
+                      }`}
+                    >
+                      {sz}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-[#c4a07e] mt-2">
+                  Baseline gauge: {activeGauge.label}. You can adjust stitch counts after.
+                </p>
+              </div>
+            )}
+
+            {/* Step 4. Ribbing */}
+            {templateKey && (
+              <div className="glass rounded-2xl border border-white/60 shadow-md p-5">
+                <h2 className="text-[11px] font-bold text-[#8b6347] uppercase tracking-widest mb-3">
+                  4. Ribbing
+                </h2>
+                <label className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-xl border border-[#251a1c] bg-[#fff0bf] px-4 py-3 text-sm font-black text-[#251a1c]">
+                  <span>{includeRibbing ? "Add ribbing where the garment needs it" : "No ribbing in the chart"}</span>
+                  <input
+                    type="checkbox"
+                    checked={includeRibbing}
+                    onChange={(e) => setIncludeRibbing(e.target.checked)}
+                    className="h-5 w-5 shrink-0 accent-[#4fae68]"
+                  />
+                </label>
+                <p className="mt-2 text-[10px] leading-relaxed text-[#c4a07e]">
+                  This affects hems, cuffs, collars, button bands, and pocket tops. Blankets, shawls, and scarves stay plain unless you deliberately draw ribbing.
+                </p>
+              </div>
+            )}
+
+            {/* Step 5. Sections */}
+            {templateKey && (
+              <div className="glass rounded-2xl border border-white/60 shadow-md p-5">
+                <h2 className="text-[11px] font-bold text-[#8b6347] uppercase tracking-widest mb-3">
+                  5. Project sections
+                </h2>
+                <div className="flex flex-col gap-2 mb-3">
+                  {allSections.map((sec, idx) => (
+                    <div
+                      key={sec.name + idx}
+                      className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-white/50 border border-[#e2d0bb]/60"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-2 h-2 rounded-full bg-[#8b6347]/50" />
+                        <span className="text-sm font-medium text-[#2e1f14]">{sec.name}</span>
+                        {sec.custom && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#d4907a]/20 text-[#d4907a] uppercase tracking-wide">
+                            custom
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-[#c4a07e]">
+                          {Math.round(sec.w * SIZE_W_SCALE[templateSize])} by {Math.round(sec.h * SIZE_H_SCALE[templateSize])}
+                        </span>
+                        {sec.custom && (
+                          <button
+                            onClick={() =>
+                              setCustomSections((prev) => prev.filter((_, i) => i !== idx - sections.length))
+                            }
+                            className="text-[#c4a07e] hover:text-red-400 transition-colors"
+                          >
+                            <X size={13} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {showAddSection ? (
+                  <div className="rounded-xl border border-[#8b6347]/30 bg-[#fdf7f0] p-3.5 flex flex-col gap-2.5">
+                    <p className="text-[10px] font-bold text-[#8b6347] uppercase tracking-widest">Add custom section</p>
+                    <input
+                      placeholder="Section name (e.g. Hood, Pocket)"
+                      value={newSecName}
+                      onChange={(e) => setNewSecName(e.target.value)}
+                      className="w-full border border-[#e2d0bb]/60 rounded-lg px-3 py-2 text-sm text-[#2e1f14] bg-white/70 focus:outline-none focus:border-[#8b6347] transition-colors"
+                    />
+                    <div className="flex gap-2">
+                      <div className="flex-1">
+                        <label className="text-[9px] text-[#c4a07e] font-semibold">Width (stitches)</label>
+                        <input
+                          type="number"
+                          min={5}
+                          max={220}
+                          value={newSecW}
+                          onChange={(e) => setNewSecW(Number(e.target.value))}
+                          className="w-full border border-[#e2d0bb]/60 rounded-lg px-2 py-1.5 text-sm text-center text-[#2e1f14] bg-white/70 focus:outline-none focus:border-[#8b6347] mt-0.5"
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label className="text-[9px] text-[#c4a07e] font-semibold">Height (rows)</label>
+                        <input
+                          type="number"
+                          min={5}
+                          max={220}
+                          value={newSecH}
+                          onChange={(e) => setNewSecH(Number(e.target.value))}
+                          className="w-full border border-[#e2d0bb]/60 rounded-lg px-2 py-1.5 text-sm text-center text-[#2e1f14] bg-white/70 focus:outline-none focus:border-[#8b6347] mt-0.5"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          if (!newSecName.trim()) return;
+                          setCustomSections((prev) => [...prev, { name: newSecName.trim(), w: newSecW, h: newSecH }]);
+                          setNewSecName("");
+                          setNewSecW(30);
+                          setNewSecH(40);
+                          setShowAddSection(false);
+                        }}
+                        className="flex-1 py-2 rounded-xl text-xs font-bold text-white transition-all shadow-sm"
+                        style={{ background: "linear-gradient(135deg, #8b6347, #6e4e38)" }}
+                      >
+                        Add Section
+                      </button>
+                      <button
+                        onClick={() => setShowAddSection(false)}
+                        className="px-4 py-2 rounded-xl text-xs font-bold text-[#8b6347] border border-[#e2d0bb]/60 hover:bg-white/60 transition-all"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setShowAddSection(true)}
+                    className="w-full py-2.5 rounded-xl border-2 border-dashed border-[#c4a07e]/60 text-xs font-bold text-[#c4a07e] hover:border-[#8b6347] hover:text-[#8b6347] hover:bg-white/40 transition-all flex items-center justify-center gap-2"
+                  >
+                    <Plus size={13} /> Add another section
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Start button */}
+            <button
+              onClick={() => {
+                if (templateKey) {
+                  applyTemplate(templateKey, 0, templateSize);
+                } else {
+                  startFreehand();
+                }
+                setSetupComplete(true);
+              }}
+              className="w-full py-4 rounded-2xl text-white text-base font-bold transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5"
+              style={{ background: "linear-gradient(135deg, #8b6347, #6e4e38)" }}
+            >
+              Start Designing
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  // End wizard
 
   return (
     <div className="min-h-screen py-6 px-4">
@@ -671,6 +992,7 @@ function ChartEditorContent() {
                   >
                     {ct === "knitting" ? "Knitting" : "Crochet"}
                   </button>
+
                 ))}
               </div>
 
@@ -696,27 +1018,31 @@ function ChartEditorContent() {
               <p className="mb-3 rounded-lg border border-[#2e1f14] bg-[#fff0bf] px-2.5 py-2 text-[10px] font-semibold leading-relaxed text-[#2e1f14]">
                 Baseline gauge: {activeGauge.label}. Size L cardigan back = 76 stitches (42 in finished bust). Swatch first if your yarn behaves differently.
               </p>
-              <button
-                type="button"
-                onClick={() => {
-                  const next = !includeRibbing;
-                  setIncludeRibbing(next);
-                  if (templateKey) {
-                    const sectionName = activeTemplates[templateKey]?.sections[templateSection]?.name;
-                    if (sectionName) {
-                      pushHistory();
-                      setCells(buildStarterGrid(sectionName, gridW, gridH, next));
-                    }
-                  }
-                }}
-                className={`w-full mb-3 px-3 py-2 rounded-xl border text-xs font-black transition-all ${
+              <label
+                className={`flex w-full cursor-pointer items-center justify-between gap-3 mb-3 px-3 py-2 rounded-xl border text-xs font-black transition-all ${
                   includeRibbing
                     ? "border-[#251a1c] bg-[#fff0bf] text-[#251a1c]"
                     : "border-[#e2d0bb]/60 text-[#8b6347] hover:bg-white/60"
                 }`}
               >
-                {includeRibbing ? "Ribbing included in chart" : "No ribbing in chart"}
-              </button>
+                <span>{includeRibbing ? "Ribbing included in chart" : "No ribbing in chart"}</span>
+                <input
+                  type="checkbox"
+                  checked={includeRibbing}
+                  onChange={(event) => {
+                    const target = event.target.checked;
+                    setIncludeRibbing(target);
+                    if (templateKey) {
+                      const sectionName = projectSections[templateSection]?.name;
+                      if (sectionName) {
+                        pushHistory();
+                        setCells(buildStarterGrid(sectionName, gridW, gridH, target));
+                      }
+                    }
+                  }}
+                  className="h-4 w-4 shrink-0 accent-[#4fae68]"
+                />
+              </label>
 
               {/* Garment grid */}
               <button
@@ -751,13 +1077,13 @@ function ChartEditorContent() {
                 ))}
               </div>
 
-              {templateKey && activeTemplates[templateKey] && (
+              {templateKey && projectSections.length > 0 && (
                 <>
                   <div className="text-[10px] font-bold text-[#2e1f14] uppercase tracking-widest mb-1.5">Section</div>
                   <div className="flex flex-col gap-1 mb-3">
-                    {activeTemplates[templateKey].sections.map((sec, idx) => (
+                    {projectSections.map((sec, idx) => (
                       <button
-                        key={sec.name}
+                        key={`${sec.name}-${idx}`}
                         onClick={() => applyTemplate(templateKey, idx)}
                         className={`w-full text-left px-3 py-2 rounded-xl border text-xs transition-all flex items-center justify-between ${
                           templateSection === idx

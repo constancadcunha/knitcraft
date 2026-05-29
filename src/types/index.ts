@@ -85,6 +85,7 @@ export interface QuickReferenceItem {
   detail: string;
   imageUrl?: string;
   sourceUrl?: string;
+  colorHex?: string;
 }
 
 export interface QuickReferenceGroup {
@@ -144,7 +145,7 @@ export const GARMENT_TEMPLATES: Record<string, GarmentTemplate> = {
 };
 
 export interface WizardConfig {
-  startingPoint: "image" | "text" | null;
+  startingPoint: "image" | "text" | "chart" | null;
   imageFile: File | null;
   imagePreview: string | null;
   textDescription: string;
@@ -156,6 +157,7 @@ export interface WizardConfig {
   includeRibbing: boolean;
   styleOption: string;
   stitchPreference: string;
+  selectedColors: string[];
 }
 
 export const GARMENT_TYPES = [

@@ -169,12 +169,14 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
     const rect = canvas.getBoundingClientRect();
     const scaleY = rect.height / Math.max(1, canvas.height);
     const scaleX = rect.width / Math.max(1, canvas.width);
+    const bottomReserve = rowPanelRef.current?.offsetHeight ?? 0;
+    const visibleHeight = Math.max(80, container.clientHeight - bottomReserve);
     const rowY = selectedRow * CELL_SIZE * scaleY;
     const colX =
       (selectedCell?.row === selectedRow ? selectedCell.col : Math.floor((chart?.width ?? 1) / 2)) *
       CELL_SIZE *
       scaleX;
-    const targetTop = rowY - container.clientHeight / 2 + (CELL_SIZE * scaleY) / 2;
+    const targetTop = rowY - visibleHeight / 2 + (CELL_SIZE * scaleY) / 2;
     const targetLeft = colX - container.clientWidth / 2 + (CELL_SIZE * scaleX) / 2;
     container.scrollTop = Math.max(0, targetTop);
     container.scrollLeft = Math.max(0, targetLeft);
@@ -485,6 +487,19 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
     }
     return total > 0 ? Math.round((done / total) * 100) : 0;
   };
+  const displayColorIndex = (colorIndex: number) => (colorIndex === 6 || colorIndex === 9 ? 0 : colorIndex);
+  const usedColorIndexes = Array.from(
+    new Set(
+      Array.from({ length: chart.height }).flatMap((_, row) =>
+        Array.from({ length: chart.width })
+          .map((__, col) => {
+            if (!isChartActive(row, col)) return null;
+            return displayColorIndex(chart.cells[row]?.[col]?.colorIndex ?? 0);
+          })
+          .filter((value): value is number => value !== null)
+      )
+    )
+  ).sort((a, b) => a - b);
 
   return (
     <div className="min-h-screen">
@@ -620,16 +635,20 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
                 {guideItems.map((item, index) => {
                   const done = !!completed[`${index},0`];
                   return (
-                    <button
+                    <div
                       key={`${item.groupTitle}-${item.title}-${index}`}
-                      onClick={() => setCellDone(index, 0, !done)}
-                      className={`w-full text-left rounded-xl border p-4 transition-all ${
+                      className={`w-full rounded-xl border p-4 transition-all ${
                         done
                           ? "border-[#6a9470] bg-[#6a9470]/10"
                           : "border-[#e8ddd0] bg-[#fffaf0] hover:border-[#251a1c]"
                       }`}
                     >
-                      <div className="flex items-start gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setCellDone(index, 0, !done)}
+                        className="w-full text-left"
+                      >
+                        <div className="flex items-start gap-3">
                         <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 ${
                           done ? "bg-[#6a9470] border-[#6a9470] text-white" : "border-[#c4a07e] bg-white text-transparent"
                         }`}>
@@ -639,11 +658,40 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
                           <span className="block text-[10px] font-black uppercase tracking-wide text-[#8b6f47]">
                             {item.groupTitle} / Step {index + 1}
                           </span>
-                          <span className="block text-sm font-black text-[#251a1c]">{item.title}</span>
+                          <span className="mt-1 flex items-center gap-2 text-sm font-black text-[#251a1c]">
+                            {item.colorHex && (
+                              <span
+                                className="h-5 w-5 shrink-0 rounded border-2 border-[#251a1c]"
+                                style={{ backgroundColor: item.colorHex }}
+                                aria-hidden
+                              />
+                            )}
+                            <span>{item.title}</span>
+                          </span>
                           <span className="mt-1 block text-xs leading-relaxed text-[#6b5d52]">{item.detail}</span>
                         </span>
-                      </div>
-                    </button>
+                        </div>
+                      </button>
+                      {(item.imageUrl || item.sourceUrl) && (
+                        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                          {item.imageUrl && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={item.imageUrl}
+                              alt={`${item.title} diagram`}
+                              className="h-24 w-full max-w-[220px] rounded-lg border border-[#e8ddd0] bg-white object-contain p-2"
+                              loading="lazy"
+                            />
+                          )}
+                          <Link
+                            href={item.sourceUrl ?? guideLearnHref(item.title)}
+                            className="inline-flex items-center gap-1.5 self-start rounded-lg border border-[#251a1c] bg-[#fff0bf] px-3 py-2 text-xs font-black text-[#251a1c]"
+                          >
+                            <BookOpen size={13} /> Open matching lesson
+                          </Link>
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -730,9 +778,9 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
 
             {/* Colour legend */}
             <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-[#e8ddd0]">
-              {chart.colors.map((c, i) => (
+              {usedColorIndexes.map((i) => (
                 <div key={i} className="flex items-center gap-1">
-                  <div className="w-3.5 h-3.5 rounded border border-[#e8ddd0]" style={{ backgroundColor: c }} />
+                  <div className="w-3.5 h-3.5 rounded border border-[#e8ddd0]" style={{ backgroundColor: chart.colors[i] ?? "#f5ede0" }} />
                   <span className="text-[10px] text-[#8b7968]">{i + 1}</span>
                 </div>
               ))}
@@ -904,4 +952,12 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
 
 function LayoutGridIcon() {
   return <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>;
+}
+
+function guideLearnHref(title: string) {
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return slug ? `/learn#learn-${slug}` : "/learn";
 }

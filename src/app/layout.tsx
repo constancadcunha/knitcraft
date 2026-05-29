@@ -26,7 +26,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${lora.variable} ${inter.variable}`}>
+    <html lang="en" data-scroll-behavior="smooth" className={`${lora.variable} ${inter.variable}`}>
       <body className="min-h-screen flex flex-col">
         <StoreProvider>
           <Navbar />

@@ -119,9 +119,10 @@ Rules:
 6. Knitting: begin with cast-on. Crochet: begin with foundation chain or foundation single crochet - never "cast on."
 7. Chart reading note: for flat knitting, right-side rows are read right-to-left (blank square = knit stitch). Wrong-side rows are read left-to-right (blank square = purl stitch). State this clearly.
 8. If the style option includes collar, ribbing, buttons, or pockets, reflect that directly in the chart sections - e.g. button placement in the band section, collar depth in the neckline section.
-9. Abbreviations must cover every abbreviation used in the instructions. Include clear videoKeywords for each.
-10. Be creative with the pattern name and keep it craft-specific.
-11. Return ONLY valid JSON, no markdown fences, no explanation text.`;
+9. The named motif and colours are binding. If the request says flowers, draw flowers; if it says stars and stripes, use stars and stripes. Do not invent spiders, random stripes, unrelated animals, or unrelated motifs.
+10. Abbreviations must cover every abbreviation used in the instructions. Include clear videoKeywords for each.
+11. Be creative with the pattern name and keep it craft-specific.
+12. Return ONLY valid JSON, no markdown fences, no explanation text.`;
 }
 
 type MessageContent =
@@ -194,13 +195,16 @@ export async function generatePattern(params: GenerateParams): Promise<Pattern> 
 
   const modelList = params.imageBase64 ? VISION_MODELS : TEXT_MODELS;
   let rawText: string | null = null;
-  const deadline = Date.now() + 25000;
+  const deadline = Date.now() + 7000;
 
   for (const model of modelList) {
     const remaining = deadline - Date.now();
-    if (remaining < 3000) break;
+    if (remaining < 1500) break;
     try {
-      rawText = await callModel(apiKey, model, userContent, remaining);
+      rawText = await Promise.race([
+        callModel(apiKey, model, userContent, Math.min(remaining, 2500)).catch(() => null),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), Math.min(remaining, 2500))),
+      ]);
       if (rawText) break;
     } catch {
       // Try the next free model or fall back to the local gauge-first pattern.
@@ -325,10 +329,11 @@ function buildFallbackPattern(params: GenerateParams): Pattern {
   const skeins = Object.fromEntries(sizes.map((size) => [size, estimateSkeins(garment, size, params.craftType)]));
   const hasPockets = /pocket/i.test(params.extraNotes) || garment === "Cardigan";
   const counts = buildPatternCounts(params.craftType, garment, sizes);
+  const draftName = fallbackPatternName(params);
 
   return {
     id: generateId(),
-    name: `${garment} Workshop Draft`,
+    name: draftName,
     craftType: params.craftType,
     garmentType: garment,
     difficulty: params.difficulty,
@@ -386,8 +391,26 @@ function buildFallbackPattern(params: GenerateParams): Pattern {
     createdAt: new Date().toISOString(),
     sourceType: params.imageBase64 ? "image" : "text",
     sourceDescription: params.textDescription,
-    previewImage: buildPreviewImage(params, `${garment} Workshop Draft`),
+    previewImage: buildPreviewImage(params, draftName),
   };
+}
+
+function fallbackPatternName(params: GenerateParams): string {
+  const text = `${params.textDescription ?? ""} ${params.extraNotes ?? ""}`.toLowerCase();
+  if (/star|moon|celestial|spark/.test(text) && /stripe|striped|stripes/.test(text)) {
+    return `Stars and Stripes ${params.garmentType} Draft`;
+  }
+  const motifs = [
+    [/flower|floral|daisy|rose|garden|bloom/, "Flower"],
+    [/heart|love|valentine/, "Heart"],
+    [/star|moon|celestial|spark/, "Celestial"],
+    [/stripe|striped/, "Striped"],
+    [/check|plaid|gingham/, "Checked"],
+    [/wave|ocean|ripple/, "Wave"],
+    [/diamond|argyle|fair isle|fairisle/, "Diamond"],
+  ] as const;
+  const motif = motifs.find(([regex]) => regex.test(text))?.[1];
+  return `${motif ? `${motif} ` : ""}${params.garmentType} Draft`;
 }
 
 type PatternCounts = {
