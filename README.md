@@ -1,36 +1,50 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# StitchCraft Studio
 
-## Getting Started
+A knitting and crochet workspace for drafting patterns, designing shaped colourwork charts, tracking rows and stitches, and learning techniques.
 
-First, run the development server:
+## Run Locally
+
+```bash
+npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+If your shell cannot find Node but Homebrew installed it, run:
+
+```bash
+PATH="/opt/homebrew/bin:$PATH" npm run dev
+```
+
+## Optional Pattern Generation
+
+The app works without a cloud key and will create a local gauge-first pattern draft. To enable cloud generation, add this to `.env.local`:
+
+```bash
+OPENROUTER_API_KEY=your_key_here
+```
+
+## GitHub Setup
+
+1. Create a new empty repository on GitHub.
+2. In this project folder, run:
+
+```bash
+git init
+git add .
+git commit -m "Initial StitchCraft Studio build"
+git branch -M main
+git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO.git
+git push -u origin main
+```
+
+3. Keep `.env.local` private. It is already ignored by Git.
+
+## Scripts
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run lint
+npm run build
 ```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
