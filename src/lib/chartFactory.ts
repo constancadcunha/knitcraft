@@ -4,7 +4,8 @@ import { GARMENT_TEMPLATES } from "@/types";
 import { generateId } from "@/lib/id";
 import { getShapeKey, isActiveChartCell } from "@/lib/shapes";
 import { getAssemblyInstructions, getQuickReference } from "@/lib/projectGuides";
-import { extractNamedColours, hasMotif, hasStarryNight } from "@/lib/designIntent";
+import { detectIconMotif, extractNamedColours, hasMonet, hasMotif, hasStarryNight, type IconMotif } from "@/lib/designIntent";
+import { stitchDisplayImage } from "@/lib/stitchImages";
 import {
   buildGaugeTemplate,
   estimateSkeins,
@@ -22,6 +23,14 @@ export const DEFAULT_CHART_COLORS = [
   "#e8c46a", "#ffffff",
 ];
 
+function normalizeChartColors(colors: string[]): string[] {
+  const next = [...colors];
+  for (let i = next.length; i < DEFAULT_CHART_COLORS.length; i++) {
+    next[i] = DEFAULT_CHART_COLORS[i];
+  }
+  return next.slice(0, DEFAULT_CHART_COLORS.length);
+}
+
 export function makeGrid(w: number, h: number): number[][] {
   return Array.from({ length: h }, () => Array(w).fill(0));
 }
@@ -30,12 +39,87 @@ function isRibbingEligible(sectionName: string): boolean {
   return /back|front|sleeve|brim|cuff|band|collar|neck|pocket/i.test(sectionName);
 }
 
+function projectStyleText(pattern: Pattern): string {
+  return `${pattern.sourceDescription ?? ""} ${pattern.name} ${pattern.notes ?? ""}`.toLowerCase();
+}
+
+function patternChartText(pattern: Pattern): string {
+  const sectionText = pattern.sections.flatMap((section) => [
+    section.name,
+    section.description,
+    ...section.instructions.slice(0, 4).map((instruction) => instruction.text),
+  ]);
+  return [pattern.sourceDescription, pattern.name, pattern.notes, ...sectionText].filter(Boolean).join(" ");
+}
+
+function wantsHighNeck(pattern: Pattern): boolean {
+  return /turtleneck|roll-neck|roll neck|mock neck|high neck/.test(projectStyleText(pattern));
+}
+
+function shapeKeyForPatternSection(pattern: Pattern, garmentKey: string, sectionName: string): string {
+  if (wantsHighNeck(pattern) && /^(Sweater|Pullover)$/i.test(garmentKey)) {
+    if (/^front$/i.test(sectionName)) return "sweaterFrontHighNeck";
+    if (/^back$/i.test(sectionName)) return "sweaterBackHighNeck";
+  }
+  return getShapeKey(garmentKey, sectionName);
+}
+
+function customizeSectionsForStyle(
+  baseSections: { name: string; w: number; h: number; role?: "materials" | "prep" | "chart" | "finish" }[],
+  garmentKey: string,
+  pattern: Pattern
+) {
+  const text = projectStyleText(pattern);
+  const hasPocket = /\bpockets?|patch-pocket|patch pocket\b/.test(text);
+  const isOpenFront = /open-front|open front|duster|no buttons|without buttons|skip buttons/.test(text);
+  const wantsShawlCollar = /shawl-collar|shawl collar/.test(text);
+  const wantsHood = /\bhood(?:ed)?\b/.test(text);
+  const wantsTurtleneck = /turtleneck|roll-neck|roll neck|mock neck|high neck/.test(text);
+
+  return baseSections
+    .map((section) => {
+      if (garmentKey === "Sweater" && /^(collar|neckband)$/i.test(section.name)) {
+        return {
+          ...section,
+          name: wantsTurtleneck ? "Turtleneck Collar" : "Neckband",
+          h: wantsTurtleneck ? Math.max(section.h * 3, section.h + 16) : section.h,
+        };
+      }
+
+      if (garmentKey === "Cardigan") {
+        if (/^button band$/i.test(section.name) && isOpenFront) {
+          return { ...section, name: "Front Bands" };
+        }
+        if (/^(collar|neckband)$/i.test(section.name)) {
+          if (wantsHood) return { ...section, name: "Hood", w: Math.max(section.w, 44), h: Math.max(section.h * 4, section.h + 24) };
+          if (wantsShawlCollar) return { ...section, name: "Shawl Collar", h: Math.max(section.h * 2, section.h + 10) };
+          if (wantsTurtleneck) return { ...section, name: "Turtleneck Collar", h: Math.max(section.h * 3, section.h + 16) };
+          return { ...section, name: "Neckband" };
+        }
+      }
+
+      return section;
+    })
+    .filter((section) => {
+      if (garmentKey === "Cardigan" && /^pocket$/i.test(section.name) && !hasPocket) return false;
+      return true;
+    });
+}
+
 function isRibbingMarker(colorIndex: number): boolean {
   return colorIndex === 6;
 }
 
+function isLegacyRibbingMarker(chart: SavedChart, colorIndex: number): boolean {
+  return isRibbingMarker(colorIndex) && !!chart.includeRibbing;
+}
+
 function isNotionMarker(colorIndex: number): boolean {
   return colorIndex === 9;
+}
+
+function isLegacyNotionMarker(chart: SavedChart, colorIndex: number): boolean {
+  return isNotionMarker(colorIndex) && /button band|button/i.test(chart.sectionName ?? "");
 }
 
 export function buildStarterGrid(sectionName: string, w: number, h: number, includeRibbing: boolean): number[][] {
@@ -61,7 +145,7 @@ export function buildStarterGrid(sectionName: string, w: number, h: number, incl
 
   if (isBand) {
     for (let row = 0; row < h; row++) {
-      for (let col = 0; col < w; col++) grid[row][col] = includeRibbing && col % 2 === 0 ? 6 : 0;
+      for (let col = 0; col < w; col++) grid[row][col] = 0;
     }
     const buttonCount = Math.max(4, Math.min(7, Math.round(h / 18)));
     const center = Math.floor(w / 2);
@@ -79,7 +163,7 @@ export function buildStarterGrid(sectionName: string, w: number, h: number, incl
 
   if (includeRibbing && isCollar) {
     for (let row = 0; row < h; row++) {
-      for (let col = 0; col < w; col++) grid[row][col] = row % 2 === 0 ? 6 : 0;
+      for (let col = 0; col < w; col++) grid[row][col] = col % 2 === 0 ? 6 : 0;
     }
   }
 
@@ -94,11 +178,12 @@ function buildDesignedGrid(
   h: number,
   includeRibbing: boolean,
   chartColors: string[],
-  importedChart?: ImportedChart
+  importedChart?: ImportedChart,
+  inspirationChart?: ImportedChart
 ): number[][] {
   const grid = buildStarterGrid(sectionName, w, h, includeRibbing);
-  const shapeKey = getShapeKey(garmentKey, sectionName);
-  const text = `${pattern.sourceDescription ?? ""} ${pattern.name}`.toLowerCase();
+  const shapeKey = shapeKeyForPatternSection(pattern, garmentKey, sectionName);
+  const text = patternChartText(pattern).toLowerCase();
   const seed = hashText(`${text} ${pattern.sourceImagePreview?.slice(0, 800) ?? ""} ${sectionName}`);
   const lower = sectionName.toLowerCase();
   const isBand = lower.includes("button band");
@@ -113,22 +198,52 @@ function buildDesignedGrid(
   const maxRow = Math.max(minRow, ribStart - 2);
   const colours = pickDesignColours(text, seed, chartColors);
   const motif = chooseMotif(text);
+  const iconMotif = detectIconMotif(text);
+  const hasNamedDesignIntent =
+    hasMonet(text) ||
+    hasStarryNight(text) ||
+    !!iconMotif ||
+    hasLettering(text) ||
+    hasMotif(text, "flower") ||
+    hasMotif(text, "heart") ||
+    hasMotif(text, "star") ||
+    hasMotif(text, "stripe") ||
+    hasMotif(text, "checker") ||
+    hasMotif(text, "wave") ||
+    hasMotif(text, "diamond") ||
+    hasMotif(text, "speckle");
+
+  if (importedChart?.grid.length && isMainDesignSection(garmentKey, sectionName)) {
+    applyImportedChart(grid, shapeKey, w, h, importedChart, minRow, maxRow);
+    return grid;
+  }
 
   if (importedChart?.grid.length) {
-    applyImportedChart(grid, shapeKey, w, h, importedChart, minRow, maxRow);
     if (isBand) addButtonMarkers(grid, w, h);
     return grid;
   }
 
-  const imageReference = !!pattern.sourceImagePreview && !importedChart;
-  if (imageReference) {
-    drawImageReferenceLayout(grid, shapeKey, sectionName, w, h, chartColors, minRow, maxRow);
+  if (inspirationChart?.grid.length && isMainDesignSection(garmentKey, sectionName) && !hasNamedDesignIntent) {
+    applyImportedChart(grid, shapeKey, w, h, inspirationChart, minRow, maxRow);
+    if (isBand) addButtonMarkers(grid, w, h);
+    return grid;
   }
 
-  if (hasStarryNight(text)) {
+  if (inspirationChart?.grid.length && !isMainDesignSection(garmentKey, sectionName)) {
+    if (isBand) addButtonMarkers(grid, w, h);
+    return grid;
+  }
+
+  if (hasMonet(text)) {
+    drawMonetWaterGarden(grid, shapeKey, w, h, chartColors, minRow, maxRow, seed);
+  } else if (hasStarryNight(text)) {
     drawStarryNight(grid, shapeKey, w, h, chartColors, minRow, maxRow);
+  } else if (iconMotif) {
+    drawIconMotif(grid, shapeKey, w, h, iconMotif, colours, text);
   } else if (hasMotif(text, "star") && hasMotif(text, "stripe")) {
     drawStarsAndStripes(grid, shapeKey, w, h, chartColors, colours, minRow, maxRow);
+  } else if (hasLettering(text) && isMainDesignSection(garmentKey, sectionName)) {
+    drawLetteringMotif(grid, shapeKey, w, h, colours, text, minRow, maxRow);
   } else if (motif !== null && !hasMotif(text, "flower") && !hasMotif(text, "heart") && !hasMotif(text, "star")) {
     for (let row = minRow; row < maxRow; row++) {
       for (let col = 0; col < w; col++) {
@@ -151,9 +266,100 @@ function buildDesignedGrid(
   if (hasMotif(text, "flower")) drawFlowerRepeats(grid, shapeKey, w, h, colours, text);
   if (hasMotif(text, "heart")) drawHeart(grid, shapeKey, w, h, colours[0]);
   if (hasMotif(text, "star") && !hasMotif(text, "stripe") && !hasStarryNight(text)) drawStarRepeats(grid, shapeKey, w, h, colours[0], text);
+  if (shouldDrawPromptFallback(text, garmentKey, sectionName, grid)) {
+    drawPromptFallbackMotif(grid, shapeKey, w, h, colours, minRow, maxRow, text, seed);
+  }
 
   if (isBand) addButtonMarkers(grid, w, h);
   return grid;
+}
+
+function shouldDrawPromptFallback(text: string, garmentKey: string, sectionName: string, grid: number[][]): boolean {
+  if (!isMainDesignSection(garmentKey, sectionName)) return false;
+  if (!/\b(pattern|motif|graphic|design|inspired|inspo|reference|colourwork|colorwork|picture|image|illustration|scene|floral|celestial|landscape|tv|movie|film|show|series|character|costume|outfit|aesthetic|vibe)\b/.test(text)) return false;
+  const distinct = new Set(grid.flat());
+  return distinct.size <= 2;
+}
+
+function drawPromptFallbackMotif(
+  grid: number[][],
+  shapeKey: string,
+  w: number,
+  h: number,
+  colours: number[],
+  minRow: number,
+  maxRow: number,
+  text: string,
+  seed: number
+) {
+  const activeShape = shapeKey === "rect" ? undefined : shapeKey;
+  const primary = colours[0] ?? 1;
+  const secondary = colours[1] ?? primary;
+  const accent = colours[2] ?? secondary;
+  const bandHeight = Math.max(3, Math.round((maxRow - minRow) / 10));
+  const hasReference = /\b(tv|movie|film|show|series|character|costume|outfit|reference|inspo|inspired|vibe|aesthetic)\b/.test(text);
+  const wantsPanel = /\b(panel|band|stripe|block|colourblock|colorblock|yoke|chest|slogan|letter|text|word|logo)\b/.test(text) || hasReference;
+  const yokeEnd = Math.round(minRow + (maxRow - minRow) * 0.24);
+  const hemStart = Math.round(minRow + (maxRow - minRow) * 0.78);
+
+  if (wantsPanel) {
+    for (let row = yokeEnd; row < Math.min(maxRow, yokeEnd + bandHeight * 2); row++) {
+      for (let col = Math.round(w * 0.08); col < Math.round(w * 0.92); col++) {
+        if (isActiveChartCell(activeShape, undefined, row, col, w, h)) grid[row][col] = secondary;
+      }
+    }
+    for (let row = Math.max(minRow, hemStart - bandHeight); row < hemStart; row++) {
+      for (let col = Math.round(w * 0.1); col < Math.round(w * 0.9); col++) {
+        if (isActiveChartCell(activeShape, undefined, row, col, w, h)) grid[row][col] = accent;
+      }
+    }
+  }
+
+  const lanes = 3 + (seed % 3);
+  for (let i = 0; i < lanes; i++) {
+    const rowBase = Math.round(minRow + (maxRow - minRow) * (0.28 + i * 0.13));
+    for (let col = Math.round(w * 0.14); col < Math.round(w * 0.86); col++) {
+      const wave = rowBase + Math.round(Math.sin((col + seed + i * 11) / 7) * Math.max(1, bandHeight * 0.35));
+      for (let thickness = -1; thickness <= 1; thickness++) {
+        const row = wave + thickness;
+        if (inGrid(grid, row, col) && isActiveChartCell(activeShape, undefined, row, col, w, h)) {
+          grid[row][col] = i % 2 === 0 ? primary : secondary;
+        }
+      }
+    }
+  }
+
+  const motifCount = hasReference ? 5 : 3;
+  for (let i = 0; i < motifCount; i++) {
+    const cx = Math.round(w * (0.2 + (i % 3) * 0.3));
+    const cy = Math.round(minRow + (maxRow - minRow) * (0.38 + Math.floor(i / 3) * 0.24));
+    const r = Math.max(2, Math.round(Math.min(w, maxRow - minRow) / 26));
+    if ((seed + i) % 2 === 0) drawStar(grid, shapeKey, w, h, cx, cy, r, accent);
+    else drawSmallDiamond(grid, shapeKey, w, h, cx, cy, r + 1, primary);
+  }
+
+  if (hasLettering(text)) {
+    drawLetteringMotif(grid, shapeKey, w, h, [primary, secondary], text, minRow, maxRow);
+  }
+}
+
+function drawSmallDiamond(
+  grid: number[][],
+  shapeKey: string,
+  w: number,
+  h: number,
+  cx: number,
+  cy: number,
+  radius: number,
+  colorIndex: number
+) {
+  const activeShape = shapeKey === "rect" ? undefined : shapeKey;
+  for (let row = cy - radius; row <= cy + radius; row++) {
+    for (let col = 0; col < w; col++) {
+      if (!inGrid(grid, row, col) || !isActiveChartCell(activeShape, undefined, row, col, w, h)) continue;
+      if (Math.abs(col - cx) + Math.abs(row - cy) <= radius) grid[row][col] = colorIndex;
+    }
+  }
 }
 
 function chooseMotif(text: string): "stripes" | "checker" | "waves" | "diamonds" | "speckles" | null {
@@ -164,6 +370,62 @@ function chooseMotif(text: string): "stripes" | "checker" | "waves" | "diamonds"
   if (hasMotif(text, "speckle")) return "speckles";
   return null;
 }
+
+function hasLettering(text: string): boolean {
+  const lower = text.toLowerCase();
+  return /\b(lettering|letters|text|words?|name|typography|quote|book title)\b/.test(lower)
+    || /jane\s+eyre/i.test(text)
+    || /["'“”‘’][^"'“”‘’]{2,32}["'“”‘’]/.test(text);
+}
+
+function extractLetteringText(text: string): string {
+  const quoted = text.match(/["'“”‘’]([^"'“”‘’]{2,32})["'“”‘’]/);
+  if (quoted?.[1]) return quoted[1].trim().toUpperCase();
+  if (/jane\s+eyre/i.test(text)) return "JANE EYRE";
+  const afterWords = text.match(/\b(?:text|wording|lettering|letters?|name)\s+(?:that\s+says\s+|says\s+|of\s+|as\s+)?([a-z0-9 ]{2,24})/i);
+  if (afterWords?.[1]) return afterWords[1].replace(/\b(on|for|with|in|across|front|back)\b.*$/i, "").trim().toUpperCase();
+  return "TEXT";
+}
+
+const BLOCK_LETTERS: Record<string, string[]> = {
+  A: ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
+  B: ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
+  C: ["01111", "10000", "10000", "10000", "10000", "10000", "01111"],
+  D: ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
+  E: ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
+  F: ["11111", "10000", "10000", "11110", "10000", "10000", "10000"],
+  G: ["01111", "10000", "10000", "10011", "10001", "10001", "01111"],
+  H: ["10001", "10001", "10001", "11111", "10001", "10001", "10001"],
+  I: ["11111", "00100", "00100", "00100", "00100", "00100", "11111"],
+  J: ["00111", "00010", "00010", "00010", "10010", "10010", "01100"],
+  K: ["10001", "10010", "10100", "11000", "10100", "10010", "10001"],
+  L: ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
+  M: ["10001", "11011", "10101", "10101", "10001", "10001", "10001"],
+  N: ["10001", "11001", "10101", "10011", "10001", "10001", "10001"],
+  O: ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
+  P: ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
+  Q: ["01110", "10001", "10001", "10001", "10101", "10010", "01101"],
+  R: ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
+  S: ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
+  T: ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
+  U: ["10001", "10001", "10001", "10001", "10001", "10001", "01110"],
+  V: ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
+  W: ["10001", "10001", "10001", "10101", "10101", "11011", "10001"],
+  X: ["10001", "10001", "01010", "00100", "01010", "10001", "10001"],
+  Y: ["10001", "10001", "01010", "00100", "00100", "00100", "00100"],
+  Z: ["11111", "00001", "00010", "00100", "01000", "10000", "11111"],
+  "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
+  "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
+  "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
+  "3": ["11110", "00001", "00001", "01110", "00001", "00001", "11110"],
+  "4": ["10010", "10010", "10010", "11111", "00010", "00010", "00010"],
+  "5": ["11111", "10000", "10000", "11110", "00001", "00001", "11110"],
+  "6": ["01111", "10000", "10000", "11110", "10001", "10001", "01110"],
+  "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
+  "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
+  "9": ["01110", "10001", "10001", "01111", "00001", "00001", "11110"],
+  " ": ["000", "000", "000", "000", "000", "000", "000"],
+};
 
 function pickDesignColours(text: string, seed: number, chartColors: string[]): number[] {
   const paletteSize = chartColors.length;
@@ -185,100 +447,73 @@ function hexEquals(a: string | undefined, b: string): boolean {
   return (a ?? "").toLowerCase() === b.toLowerCase();
 }
 
-function drawImageReferenceLayout(
+function isMainDesignSection(garmentKey: string, sectionName: string): boolean {
+  const lower = sectionName.toLowerCase();
+  if (/band|collar|neck|cuff|brim|strap|base|heel|toe|thumb|finger/.test(lower)) return false;
+  if (/front|back|body|hand|scarf|blanket|shawl|cloth|headband|leg warmer|cowl/.test(lower)) return true;
+  return !/cardigan|sweater|pullover|vest|tank top/i.test(garmentKey) && /back/.test(lower);
+}
+
+function drawLetteringMotif(
   grid: number[][],
   shapeKey: string,
-  sectionName: string,
   w: number,
   h: number,
-  chartColors: string[],
+  colours: number[],
+  text: string,
   minRow: number,
   maxRow: number
 ) {
-  const lower = sectionName.toLowerCase();
-  const isFrontLike = /front|body|sweater|pullover|hand|scarf|blanket|shawl|cloth|headband|leg warmer|cowl/.test(lower);
-  if (!isFrontLike || lower.includes("band") || lower.includes("collar") || lower.includes("cuff")) return;
-
+  const label = extractLetteringText(text).replace(/[^A-Z0-9 ]/g, "").slice(0, 18) || "TEXT";
   const activeShape = shapeKey === "rect" ? undefined : shapeKey;
-  const light = findLightColorIndex(chartColors, 1);
-  const dark = findDarkColorIndex(chartColors, 2);
-  const accent = chartColors[3] ? 3 : dark;
-  const top = Math.max(minRow + 2, Math.round(h * 0.18));
-  const bandTop = Math.max(minRow + 4, Math.round(h * 0.48));
-  const bandBottom = Math.min(maxRow - 2, Math.round(h * 0.68));
+  const ink = colours[0] ?? 1;
+  const accent = colours[1] ?? ink;
+  const rows = label.split(/\s+/).length > 2 ? [label] : splitLabel(label);
+  const scale = Math.max(1, Math.min(3, Math.floor(w / Math.max(18, label.length * 4))));
+  const letterGap = Math.max(1, scale);
+  const lineGap = Math.max(2, scale * 2);
+  const lineHeight = 7 * scale;
+  const totalHeight = rows.length * lineHeight + (rows.length - 1) * lineGap;
+  let rowStart = Math.round(minRow + (maxRow - minRow - totalHeight) * 0.5);
 
-  for (let row = bandTop; row <= bandBottom; row++) {
-    for (let col = 0; col < w; col++) {
-      if (isActiveChartCell(activeShape, undefined, row, col, w, h)) grid[row][col] = light;
+  rows.forEach((line, lineIndex) => {
+    const width = lineWidth(line, scale, letterGap);
+    let colStart = Math.round((w - width) / 2);
+    const color = lineIndex === 0 ? ink : accent;
+    for (const char of line) {
+      const pattern = BLOCK_LETTERS[char] ?? BLOCK_LETTERS[" "];
+      pattern.forEach((bits, pr) => {
+        [...bits].forEach((bit, pc) => {
+          if (bit !== "1") return;
+          for (let rr = 0; rr < scale; rr++) {
+            for (let cc = 0; cc < scale; cc++) {
+              const row = rowStart + pr * scale + rr;
+              const col = colStart + pc * scale + cc;
+              if (inGrid(grid, row, col) && isActiveChartCell(activeShape, undefined, row, col, w, h)) {
+                grid[row][col] = color;
+              }
+            }
+          }
+        });
+      });
+      colStart += ((pattern[0]?.length ?? 3) * scale) + letterGap;
     }
-  }
-
-  drawPixelMotif(grid, shapeKey, w, h, Math.round(w * 0.5), top, Math.max(3, Math.round(Math.min(w, h) / 18)), dark, light);
-  drawTextBars(grid, shapeKey, w, h, Math.round((bandTop + bandBottom) / 2), dark, accent);
-}
-
-function drawPixelMotif(
-  grid: number[][],
-  shapeKey: string,
-  w: number,
-  h: number,
-  cx: number,
-  cy: number,
-  size: number,
-  dark: number,
-  light: number
-) {
-  const activeShape = shapeKey === "rect" ? undefined : shapeKey;
-  const pattern = [
-    "0011100",
-    "0111110",
-    "1101011",
-    "1111111",
-    "1011101",
-    "0010100",
-  ];
-  const cell = Math.max(1, Math.round(size / 3));
-  const startRow = cy - Math.round((pattern.length * cell) / 2);
-  const startCol = cx - Math.round((pattern[0].length * cell) / 2);
-
-  pattern.forEach((line, pr) => {
-    [...line].forEach((char, pc) => {
-      if (char !== "1") return;
-      const fill = pr >= 2 && pr <= 4 && pc >= 2 && pc <= 4 ? light : dark;
-      for (let rr = 0; rr < cell; rr++) {
-        for (let cc = 0; cc < cell; cc++) {
-          const row = startRow + pr * cell + rr;
-          const col = startCol + pc * cell + cc;
-          if (inGrid(grid, row, col) && isActiveChartCell(activeShape, undefined, row, col, w, h)) grid[row][col] = fill;
-        }
-      }
-    });
+    rowStart += lineHeight + lineGap;
   });
 }
 
-function drawTextBars(
-  grid: number[][],
-  shapeKey: string,
-  w: number,
-  h: number,
-  centerRow: number,
-  dark: number,
-  accent: number
-) {
-  const activeShape = shapeKey === "rect" ? undefined : shapeKey;
-  const widths = [5, 3, 4, 5, 2, 4, 3, 5, 4, 2];
-  const total = widths.reduce((sum, value) => sum + value, 0) + (widths.length - 1) * 2;
-  let col = Math.max(2, Math.round((w - total) / 2));
+function splitLabel(label: string): string[] {
+  if (label.length <= 10 || !label.includes(" ")) return [label];
+  const words = label.split(/\s+/);
+  const mid = Math.ceil(words.length / 2);
+  return [words.slice(0, mid).join(" "), words.slice(mid).join(" ")].filter(Boolean);
+}
 
-  widths.forEach((width, index) => {
-    const color = index === 5 ? accent : dark;
-    for (let row = centerRow - 1; row <= centerRow + 1; row++) {
-      for (let c = col; c < col + width; c++) {
-        if (inGrid(grid, row, c) && isActiveChartCell(activeShape, undefined, row, c, w, h)) grid[row][c] = color;
-      }
-    }
-    col += width + 2;
-  });
+function lineWidth(line: string, scale: number, gap: number): number {
+  return [...line].reduce((sum, char, index) => {
+    const pattern = BLOCK_LETTERS[char] ?? BLOCK_LETTERS[" "];
+    return sum + (pattern[0]?.length ?? 3) * scale + (index === line.length - 1 ? 0 : gap);
+  }, 0);
 }
 
 function drawHeart(grid: number[][], shapeKey: string, w: number, h: number, colorIndex: number) {
@@ -295,6 +530,155 @@ function drawHeart(grid: number[][], shapeKey: string, w: number, h: number, col
       }
     }
   }
+}
+
+const ICON_PATTERNS: Record<IconMotif, string[]> = {
+  penguin: [
+    "000111000",
+    "001111100",
+    "011101110",
+    "011111110",
+    "011000110",
+    "011000110",
+    "001111100",
+    "000101000",
+  ],
+  cat: [
+    "010000010",
+    "111000111",
+    "111111111",
+    "110101011",
+    "111111111",
+    "011111110",
+    "001111100",
+  ],
+  dog: [
+    "110000011",
+    "111000111",
+    "111111111",
+    "110101011",
+    "111111111",
+    "011101110",
+    "001111100",
+  ],
+  moon: [
+    "0011110",
+    "0111000",
+    "1110000",
+    "1110000",
+    "1110000",
+    "0111000",
+    "0011110",
+  ],
+  sun: [
+    "100101001",
+    "001111100",
+    "011111110",
+    "111111111",
+    "011111110",
+    "001111100",
+    "100101001",
+  ],
+  cloud: [
+    "0001110000",
+    "0011111100",
+    "0111111110",
+    "1111111111",
+    "0111111110",
+  ],
+  mountain: [
+    "000010000",
+    "000111000",
+    "001111100",
+    "011101110",
+    "111000111",
+    "111111111",
+  ],
+  mushroom: [
+    "001111100",
+    "011111110",
+    "111111111",
+    "001111100",
+    "000111000",
+    "000111000",
+  ],
+  bow: [
+    "110000011",
+    "111000111",
+    "011101110",
+    "001111100",
+    "011101110",
+    "111000111",
+    "110000011",
+  ],
+  book: [
+    "111101111",
+    "100101001",
+    "100101001",
+    "100101001",
+    "111101111",
+  ],
+  butterfly: [
+    "110000011",
+    "111010111",
+    "011111110",
+    "001111100",
+    "011111110",
+    "111010111",
+    "110000011",
+  ],
+};
+
+function drawIconMotif(
+  grid: number[][],
+  shapeKey: string,
+  w: number,
+  h: number,
+  motif: IconMotif,
+  colours: number[],
+  text: string
+) {
+  const large = /large|big|single|center|centre|middle/.test(text);
+  const pattern = ICON_PATTERNS[motif];
+  const primary = colours[0] ?? 1;
+  const secondary = colours[1] ?? primary;
+  const motifs = large
+    ? [{ cx: Math.round(w * 0.5), cy: Math.round(h * 0.42), cell: Math.max(2, Math.round(Math.min(w, h) / 32)) }]
+    : [{ cx: Math.round(w * 0.5), cy: Math.round(h * 0.36), cell: Math.max(1, Math.round(Math.min(w, h) / 40)) }];
+
+  motifs.forEach((item) => {
+    drawPixelPattern(grid, shapeKey, w, h, pattern, item.cx, item.cy, item.cell, primary, secondary);
+  });
+}
+
+function drawPixelPattern(
+  grid: number[][],
+  shapeKey: string,
+  w: number,
+  h: number,
+  pattern: string[],
+  cx: number,
+  cy: number,
+  cell: number,
+  primary: number,
+  secondary: number
+) {
+  const activeShape = shapeKey === "rect" ? undefined : shapeKey;
+  const startRow = cy - Math.round((pattern.length * cell) / 2);
+  const startCol = cx - Math.round(((pattern[0]?.length ?? 0) * cell) / 2);
+  pattern.forEach((line, pr) => {
+    [...line].forEach((char, pc) => {
+      if (char === "0") return;
+      const fill = char === "2" ? secondary : primary;
+      for (let rr = 0; rr < cell; rr++) {
+        for (let cc = 0; cc < cell; cc++) {
+          const row = startRow + pr * cell + rr;
+          const col = startCol + pc * cell + cc;
+          if (inGrid(grid, row, col) && isActiveChartCell(activeShape, undefined, row, col, w, h)) grid[row][col] = fill;
+        }
+      }
+    });
+  });
 }
 
 function drawStarRepeats(grid: number[][], shapeKey: string, w: number, h: number, colorIndex: number, text: string) {
@@ -407,6 +791,84 @@ function drawStarryNight(
   }
 }
 
+function drawMonetWaterGarden(
+  grid: number[][],
+  shapeKey: string,
+  w: number,
+  h: number,
+  chartColors: string[],
+  minRow: number,
+  maxRow: number,
+  seed: number
+) {
+  const activeShape = shapeKey === "rect" ? undefined : shapeKey;
+  const water = colorIndexForHex(chartColors, "#dbe9df", 0);
+  const leaf = colorIndexForHex(chartColors, "#6a9470", 1);
+  const blue = colorIndexForHex(chartColors, "#6e88a8", 2);
+  const pink = colorIndexForHex(chartColors, "#f08aa0", 3);
+  const yellow = colorIndexForHex(chartColors, "#ffd166", 4);
+  const white = colorIndexForHex(chartColors, "#ffffff", 5);
+  const deepGreen = colorIndexForHex(chartColors, "#2e5d50", leaf);
+
+  for (let row = minRow; row < maxRow; row++) {
+    for (let col = 0; col < w; col++) {
+      if (!isActiveChartCell(activeShape, undefined, row, col, w, h)) continue;
+      grid[row][col] = water;
+      const rippleA = Math.round(minRow + (maxRow - minRow) * 0.26 + Math.sin((col + seed) / 9) * 3);
+      const rippleB = Math.round(minRow + (maxRow - minRow) * 0.48 + Math.sin((col + seed) / 7) * 3);
+      const rippleC = Math.round(minRow + (maxRow - minRow) * 0.68 + Math.sin((col + seed) / 11) * 2);
+      if ((Math.abs(row - rippleA) <= 1 || Math.abs(row - rippleB) <= 1 || Math.abs(row - rippleC) <= 1) && col % 3 !== 0) {
+        grid[row][col] = blue;
+      }
+      if (hashText(`${seed}:brush:${row}:${col}`) % 53 === 0) grid[row][col] = white;
+    }
+  }
+
+  const padCount = Math.max(7, Math.min(13, Math.round((w * (maxRow - minRow)) / 520)));
+  for (let i = 0; i < padCount; i++) {
+    const cx = Math.round(w * (0.14 + ((i * 37 + seed) % 73) / 100));
+    const cy = Math.round(minRow + (maxRow - minRow) * (0.18 + ((i * 19 + seed) % 64) / 100));
+    const rx = Math.max(3, Math.round(w * (0.035 + (i % 3) * 0.01)));
+    const ry = Math.max(2, Math.round((maxRow - minRow) * 0.025));
+    drawOval(grid, shapeKey, w, h, cx, cy, rx, ry, i % 3 === 0 ? deepGreen : leaf);
+    if (i % 2 === 0) {
+      drawFlower(grid, shapeKey, w, h, cx + Math.round(rx * 0.3), cy - Math.round(ry * 0.4), Math.max(2, Math.round(Math.min(rx, ry) * 0.8)), pink, yellow, leaf);
+    }
+  }
+
+  const bridgeRow = Math.round(minRow + (maxRow - minRow) * 0.37);
+  for (let col = Math.round(w * 0.12); col < Math.round(w * 0.88); col++) {
+    const row = bridgeRow - Math.round(Math.sin((col / w) * Math.PI) * Math.max(4, (maxRow - minRow) * 0.08));
+    for (let thickness = 0; thickness < 2; thickness++) {
+      if (inGrid(grid, row + thickness, col) && isActiveChartCell(activeShape, undefined, row + thickness, col, w, h)) {
+        grid[row + thickness][col] = white;
+      }
+    }
+  }
+}
+
+function drawOval(
+  grid: number[][],
+  shapeKey: string,
+  w: number,
+  h: number,
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number,
+  colorIndex: number
+) {
+  const activeShape = shapeKey === "rect" ? undefined : shapeKey;
+  for (let row = cy - ry; row <= cy + ry; row++) {
+    for (let col = cx - rx; col <= cx + rx; col++) {
+      if (!inGrid(grid, row, col) || !isActiveChartCell(activeShape, undefined, row, col, w, h)) continue;
+      const dx = (col - cx) / Math.max(1, rx);
+      const dy = (row - cy) / Math.max(1, ry);
+      if (dx * dx + dy * dy <= 1) grid[row][col] = colorIndex;
+    }
+  }
+}
+
 function drawSwirl(
   grid: number[][],
   shapeKey: string,
@@ -463,48 +925,6 @@ function drawStar(
 function colorIndexForHex(chartColors: string[], hex: string, fallback: number): number {
   const index = chartColors.findIndex((color) => hexEquals(color, hex));
   return index >= 0 ? index : fallback;
-}
-
-function findLightColorIndex(chartColors: string[], fallback: number): number {
-  let best = fallback;
-  let bestScore = -1;
-  chartColors.forEach((hex, index) => {
-    if (index === 0) return;
-    const rgb = hexToRgb(hex);
-    if (!rgb) return;
-    const score = rgb[0] + rgb[1] + rgb[2];
-    if (score > bestScore) {
-      best = index;
-      bestScore = score;
-    }
-  });
-  return best;
-}
-
-function findDarkColorIndex(chartColors: string[], fallback: number): number {
-  let best = fallback;
-  let bestScore = Number.POSITIVE_INFINITY;
-  chartColors.forEach((hex, index) => {
-    if (index === 0) return;
-    const rgb = hexToRgb(hex);
-    if (!rgb) return;
-    const score = rgb[0] + rgb[1] + rgb[2];
-    if (score < bestScore) {
-      best = index;
-      bestScore = score;
-    }
-  });
-  return best;
-}
-
-function hexToRgb(hex: string): [number, number, number] | null {
-  const value = hex.replace("#", "");
-  if (!/^[0-9a-f]{6}$/i.test(value)) return null;
-  return [
-    parseInt(value.slice(0, 2), 16),
-    parseInt(value.slice(2, 4), 16),
-    parseInt(value.slice(4, 6), 16),
-  ];
 }
 
 function drawFlowerRepeats(grid: number[][], shapeKey: string, w: number, h: number, colours: number[], text: string) {
@@ -639,29 +1059,40 @@ function hashText(value: string): number {
 
 export function createProjectChartsFromPattern(
   pattern: Pattern,
-  options: { includeRibbing: boolean; colors?: string[]; importedChart?: ImportedChart }
+  options: { includeRibbing: boolean; colors?: string[]; importedChart?: ImportedChart; inspirationChart?: ImportedChart }
 ): SavedChart[] {
   const projectId = generateId();
   const size = normalizeSize(pattern.currentSize || pattern.sizes[0]);
   const garmentKey = normalizeGarmentKey(pattern.garmentType);
   const template = buildGaugeTemplate(pattern.craftType)[garmentKey] ?? GARMENT_TEMPLATES[garmentKey];
-  const sections = template?.sections?.length ? template.sections : [{ name: pattern.garmentType, w: 40, h: 60 }];
+  const baseSections = customizeSectionsForStyle(
+    template?.sections?.length ? template.sections : [{ name: pattern.garmentType, w: 40, h: 60 }],
+    garmentKey,
+    pattern
+  );
+  const sections = options.importedChart || options.inspirationChart
+    ? [...baseSections].sort((a, b) =>
+        Number(!isMainDesignSection(garmentKey, a.name)) - Number(!isMainDesignSection(garmentKey, b.name))
+      )
+    : baseSections;
   const createdAt = new Date().toISOString();
   const projectName = pattern.name;
   const sectionCount = sections.length + 3;
   const assemblyInstructions = getAssemblyInstructions(garmentKey);
   const quickReference = getQuickReference(pattern.craftType, garmentKey);
-  const chartColors = options.colors?.length
+  const chartColors = normalizeChartColors(options.colors?.length
     ? options.colors
     : options.importedChart?.colors?.length
       ? options.importedChart.colors
-      : DEFAULT_CHART_COLORS;
+      : options.inspirationChart?.colors?.length
+        ? options.inspirationChart.colors
+      : DEFAULT_CHART_COLORS);
 
   const chartSections = sections.map((section, index): SavedChart => {
     const w = Math.max(1, Math.round(section.w * SIZE_W_SCALE[size]));
     const h = Math.max(1, Math.round(section.h * SIZE_H_SCALE[size]));
-    const grid = buildDesignedGrid(pattern, garmentKey, section.name, w, h, options.includeRibbing, chartColors, options.importedChart);
-    const shapeKey = getShapeKey(garmentKey, section.name);
+    const grid = buildDesignedGrid(pattern, garmentKey, section.name, w, h, options.includeRibbing, chartColors, options.importedChart, options.inspirationChart);
+    const shapeKey = shapeKeyForPatternSection(pattern, garmentKey, section.name);
     return {
       id: generateId(),
       name: `${pattern.name} - ${section.name}`,
@@ -977,7 +1408,8 @@ function buildStartGroups(pattern: Pattern, size: GarmentSize, includeRibbing: b
 }
 
 function graphImage(craftType: Pattern["craftType"], id: string): string | undefined {
-  return getStitchGraph(craftType).find((entry) => entry.id === id)?.imageUrl;
+  const entry = getStitchGraph(craftType).find((item) => item.id === id);
+  return entry ? stitchDisplayImage(entry) : undefined;
 }
 
 function buildYarnShoppingList(
@@ -998,7 +1430,7 @@ function buildYarnShoppingList(
       for (let col = 0; col < chart.width; col++) {
         if (!isActiveChartCell(chart.shapeKey, chart.rowShaping, row, col, chart.width, chart.height)) continue;
         const raw = chart.cells[row]?.[col]?.colorIndex ?? 0;
-        const colorIndex = isRibbingMarker(raw) || isNotionMarker(raw) ? 0 : raw;
+        const colorIndex = isLegacyRibbingMarker(chart, raw) || isLegacyNotionMarker(chart, raw) ? 0 : raw;
         colorCounts.set(colorIndex, (colorCounts.get(colorIndex) ?? 0) + 1);
         totalCells++;
       }
@@ -1029,13 +1461,9 @@ function buildYarnShoppingList(
     title: `${index === 0 ? "Main colour" : `Contrast colour ${index}`} - ${entry.skeins} skein${entry.skeins === 1 ? "" : "s"}`,
     detail: `Chart colour ${entry.colorIndex + 1}. This colour covers about ${Math.max(1, Math.round((entry.count / Math.max(1, totalCells)) * 100))}% of charted stitches. Buy the same dye lot when possible.`,
     colorHex:
-      chartSections.find((chart) => chart.colors[entryColorIndex(entry.colorIndex)])
-        ?.colors[entryColorIndex(entry.colorIndex)] ?? DEFAULT_CHART_COLORS[entry.colorIndex],
+      chartSections.find((chart) => chart.colors[entry.colorIndex])
+        ?.colors[entry.colorIndex] ?? DEFAULT_CHART_COLORS[entry.colorIndex],
   }));
-}
-
-function entryColorIndex(colorIndex: number): number {
-  return isRibbingMarker(colorIndex) || isNotionMarker(colorIndex) ? 0 : colorIndex;
 }
 
 function buildFinishingGroups(garmentType: string, craftType: Pattern["craftType"]): QuickReferenceGroup[] {

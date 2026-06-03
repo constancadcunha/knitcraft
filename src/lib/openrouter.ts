@@ -2,6 +2,7 @@ import type { CraftType, Difficulty, Pattern, PatternSection } from "@/types";
 import { generateId } from "@/lib/id";
 import { getAssemblyInstructions } from "@/lib/projectGuides";
 import { estimateSkeins, gaugeForCraft, type GarmentSize, GARMENT_SIZES, SIZE_PROFILES } from "@/lib/craftKnowledge";
+import { detectIconMotif } from "@/lib/designIntent";
 
 const BASE_URL = "https://openrouter.ai/api/v1";
 
@@ -35,6 +36,7 @@ interface GenerateParams {
   extraNotes: string;
   imageBase64?: string;
   textDescription?: string;
+  includeRibbing?: boolean;
 }
 
 const PATTERN_SCHEMA = `
@@ -105,6 +107,7 @@ ${hasImage ? "Analyze the uploaded image and create a pattern inspired by it." :
 - Garment: ${params.garmentType}
 - Sizes to include: ${sizeList}
 - Difficulty level: ${params.difficulty}
+- Ribbing requested: ${params.includeRibbing ? "yes, add it only on structurally appropriate edges" : "no, do not add decorative ribbing"}
 ${params.extraNotes ? `- Special requests: ${params.extraNotes}` : ""}
 
 **Output a COMPLETE professional-grade pattern as valid JSON** following this exact schema:
@@ -114,11 +117,11 @@ Rules:
 1. Every section must have clear, numbered row-by-row instructions. Each step must be a complete sentence a beginner can follow - include exact stitch counts, not vague phrases.
 2. Stitch counts in parentheses list values for each selected size in order (e.g., "Cast on 62 (70, 76, 84, 92, 100) sts.").
 3. Include ALL standard sections for the garment type, working from the cast-on edge upward.
-4. Cardigans MUST include: Back, Left Front, Right Front, Sleeves (x2), Button Bands, Collar/Neckband, and Finishing. Sweaters MUST include: Back, Front, Sleeves, Collar, and Finishing.
-5. Start every section at the cast-on / foundation row (bottom of garment). Collar and neckline shaping happen at the TOP of each section.
+4. Cardigans MUST include: Back, Left Front, Right Front, Sleeves (x2), front bands or button bands when the style uses buttons, neckline finish (neckband unless a collar/hood is requested), and Finishing. Sweaters MUST include: Back, Front, Sleeves, neckline finish, and Finishing. Only call it a collar when the selected style is a turtleneck, roll-neck, shawl collar, hood, or other actual collar.
+5. Start every section at the cast-on / foundation row (bottom of garment). Neckline shaping and any requested collar or neckband happen at the TOP of each section.
 6. Knitting: begin with cast-on. Crochet: begin with foundation chain or foundation single crochet - never "cast on."
 7. Chart reading note: for flat knitting, right-side rows are read right-to-left (blank square = knit stitch). Wrong-side rows are read left-to-right (blank square = purl stitch). State this clearly.
-8. If the style option includes collar, ribbing, buttons, or pockets, reflect that directly in the chart sections - e.g. button placement in the band section, collar depth in the neckline section.
+8. If the style option includes collar, buttons, or pockets, reflect that directly in the chart sections - e.g. button placement in the band section, collar depth in the neckline section. Do not add collars to crew-neck, V-neck, or plain garments; use "neckband" for those. Only add ribbing when Ribbing requested is "yes".
 9. The named motif and colours are binding. If the request says flowers, draw flowers; if it says stars and stripes, use stars and stripes. Do not invent spiders, random stripes, unrelated animals, or unrelated motifs.
 10. Abbreviations must cover every abbreviation used in the instructions. Include clear videoKeywords for each.
 11. Be creative with the pattern name and keep it craft-specific.
@@ -195,15 +198,16 @@ export async function generatePattern(params: GenerateParams): Promise<Pattern> 
 
   const modelList = params.imageBase64 ? VISION_MODELS : TEXT_MODELS;
   let rawText: string | null = null;
-  const deadline = Date.now() + 7000;
+  const deadline = Date.now() + (params.imageBase64 ? 12000 : 9000);
+  const attemptTimeout = params.imageBase64 ? 4000 : 3000;
 
   for (const model of modelList) {
     const remaining = deadline - Date.now();
     if (remaining < 1500) break;
     try {
       rawText = await Promise.race([
-        callModel(apiKey, model, userContent, Math.min(remaining, 2500)).catch(() => null),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), Math.min(remaining, 2500))),
+        callModel(apiKey, model, userContent, Math.min(remaining, attemptTimeout)).catch(() => null),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), Math.min(remaining, attemptTimeout))),
       ]);
       if (rawText) break;
     } catch {
@@ -329,6 +333,7 @@ function buildFallbackPattern(params: GenerateParams): Pattern {
   const skeins = Object.fromEntries(sizes.map((size) => [size, estimateSkeins(garment, size, params.craftType)]));
   const hasPockets = /pocket/i.test(params.extraNotes) || garment === "Cardigan";
   const counts = buildPatternCounts(params.craftType, garment, sizes);
+  if (!params.includeRibbing) counts.ribRows = 1;
   const draftName = fallbackPatternName(params);
 
   return {
@@ -367,7 +372,9 @@ function buildFallbackPattern(params: GenerateParams): Pattern {
           skeins,
         },
       ],
-      needles: [primaryTool, isCrochet ? "Tapestry needle" : "3.75 mm / US 5 needles for ribbing"],
+      needles: params.includeRibbing && !isCrochet
+        ? [primaryTool, "3.75 mm / US 5 needles for ribbing"]
+        : [primaryTool],
       notions: ["Stitch markers", "Tapestry needle", garment === "Cardigan" ? "Buttons" : "Waste yarn"],
     },
     abbreviations: isCrochet
@@ -384,7 +391,7 @@ function buildFallbackPattern(params: GenerateParams): Pattern {
           { abbr: "ssk", meaning: "slip slip knit", videoKeywords: "how to knit ssk decrease" },
           { abbr: "m1", meaning: "make 1 stitch", videoKeywords: "how to knit make one increase" },
         ],
-    sections: fallbackSections(garment, isCrochet, stitchWord, mainFabric, hasPockets, counts),
+    sections: fallbackSections(garment, isCrochet, stitchWord, mainFabric, hasPockets, counts, !!params.includeRibbing),
     notes: "Gauge-first pattern draft. Check your swatch before starting; if your stitch or row count differs, adjust the counts before making the full garment.",
     currentSection: 0,
     completedRows: {},
@@ -403,6 +410,10 @@ function fallbackPatternName(params: GenerateParams): string {
   if (/star|moon|celestial|spark/.test(text) && /stripe|striped|stripes/.test(text)) {
     return `Stars and Stripes ${params.garmentType} Draft`;
   }
+  const iconMotif = detectIconMotif(text);
+  if (iconMotif) {
+    return `${titleCase(iconMotif)} ${params.garmentType} Draft`;
+  }
   const motifs = [
     [/flower|floral|daisy|rose|garden|bloom/, "Flower"],
     [/heart|love|valentine/, "Heart"],
@@ -414,6 +425,10 @@ function fallbackPatternName(params: GenerateParams): string {
   ] as const;
   const motif = motifs.find(([regex]) => regex.test(text))?.[1];
   return `${motif ? `${motif} ` : ""}${params.garmentType} Draft`;
+}
+
+function titleCase(value: string): string {
+  return value.replace(/\b[a-z]/g, (char) => char.toUpperCase());
 }
 
 type PatternCounts = {
@@ -474,7 +489,8 @@ function fallbackSections(
   stitchWord: string,
   mainFabric: string,
   hasPockets: boolean,
-  counts: PatternCounts
+  counts: PatternCounts,
+  includeRibbing: boolean
 ): PatternSection[] {
   const castOn = isCrochet ? "Make a foundation chain of" : "Cast on";
   const bindOff = isCrochet ? "Fasten off" : "Bind off";
@@ -488,7 +504,9 @@ function fallbackSections(
   const armholeStartRow = Math.round(counts.backRows * 0.62);
   const neckStartRow = Math.round(counts.backRows * 0.86);
   const capRows = Math.round(counts.sleeveRows * 0.22);
-  const ribNote = isCrochet ? "back-loop single crochet ribbing" : "k1, p1 ribbing";
+  const ribNote = includeRibbing
+    ? isCrochet ? "back-loop single crochet ribbing" : "k1, p1 ribbing"
+    : mainFabric;
 
   if (garment === "Cardigan") {
     base.push(
@@ -535,12 +553,12 @@ function fallbackSections(
         `Decrease 1 ${stitchWord} at each end of every RS row for ${capRows} rows.`,
         `${bindOff} remaining ${stitchWord}. Make the second sleeve to match.`,
       ]),
-      panelSection("Button Bands and Collar", "Bands are worked along the front edges; the collar is picked up around the neckline after the shoulders are joined.", [
+      panelSection("Button Bands and Neckband", "Bands are worked along the front edges; the neckband is picked up around the neckline after the shoulders are joined.", [
         `Button band (left front): Pick up approximately ${counts.bandSts} ${stitchWord} along the left front edge. Work in ${ribNote} for ${Math.max(4, counts.ribRows)} rows. ${bindOff} in rib.`,
         `Buttonhole band (right front): Pick up the same number along the right front edge. Work ${Math.floor(counts.ribRows / 2)} rows in rib.`,
         `Buttonhole row: Work ${Math.round(counts.bandSts * 0.12)} ${stitchWord}, *${isCrochet ? "ch 2, skip 2" : "bind off 2, cast on 2"}, work ${Math.round(counts.bandSts * 0.18)} ${stitchWord}* until ${Math.max(4, Math.round(counts.ribRows * 0.5))} buttonholes are placed. Finish the band in rib. ${bindOff} in rib.`,
-        `Collar: With RS facing, beginning at the right front neck edge, pick up approximately ${counts.collarSts} ${stitchWord} around the full neckline.`,
-        `Work in ${ribNote} for ${Math.max(6, Math.round(counts.ribRows * 0.8))} rows, or until the collar reaches the desired depth.`,
+        `Neckband: With RS facing, beginning at the right front neck edge, pick up approximately ${counts.collarSts} ${stitchWord} around the full neckline.`,
+        `Work in ${ribNote} for ${Math.max(6, Math.round(counts.ribRows * 0.8))} rows, or until the neckband reaches the desired depth.`,
         `${bindOff} loosely in rib so the neck opening stays comfortable.`,
       ])
     );
@@ -573,7 +591,7 @@ function fallbackSections(
         `Rows ${armholeStartRow + 2}-${armholeStartRow + armholeDecRows * 2}: Decrease 1 ${stitchWord} at each end every RS row ${armholeDecRows} times.`,
         `Work even until approximately ${Math.round(neckStartRow * 0.92)} rows total.`,
         `Front neck: ${bindOff.toLowerCase()} centre ${Math.round(neckSts * 1.2)} ${stitchWord}; work each side separately, decreasing 1 ${stitchWord} at neck edge every RS row until ${shoulderSts} ${stitchWord} remain.`,
-        `${bindOff} shoulder ${stitchWord}. Join shoulder seams before adding collar.`,
+        `${bindOff} shoulder ${stitchWord}. Join shoulder seams before adding the neckband.`,
       ]),
       panelSection("Sleeves (make two)", "Both sleeves are identical - cast on at the cuff and increase up to the sleeve cap.", [
         `${castOn} ${counts.sleeveCuffSts} ${stitchWord}.`,
@@ -582,7 +600,7 @@ function fallbackSections(
         `Work even until approximately ${counts.sleeveRows} rows total.`,
         `Sleeve cap: ${bindOff.toLowerCase()} ${armholeSts} ${stitchWord} at start of next 2 rows. Decrease at each end every RS row for ${capRows} rows. ${bindOff} remaining ${stitchWord}.`,
       ]),
-      panelSection("Collar", "Worked in the round or flat around the neckline after both shoulder seams are joined.", [
+      panelSection("Neckband", "Worked in the round or flat around the neckline after both shoulder seams are joined.", [
         `Join both shoulder seams.`,
         `With RS facing, pick up approximately ${counts.collarSts} ${stitchWord} evenly around the full neckline opening.`,
         `Work in ${ribNote} for ${Math.max(4, counts.ribRows)} rows for a trim neckband, or longer for a turtleneck.`,

@@ -134,18 +134,28 @@ export interface GarmentTemplate {
 }
 
 export const GARMENT_TEMPLATES: Record<string, GarmentTemplate> = {
-  Sweater: { sections: [{ name: "Back", w: 76, h: 106 }, { name: "Front", w: 76, h: 106 }, { name: "Collar", w: 55, h: 11 }, { name: "Left Sleeve", w: 49, h: 79 }, { name: "Right Sleeve", w: 49, h: 79 }] },
-  Cardigan: { sections: [{ name: "Back", w: 76, h: 106 }, { name: "Front Right", w: 43, h: 106 }, { name: "Front Left", w: 43, h: 106 }, { name: "Button Band", w: 8, h: 106 }, { name: "Collar", w: 58, h: 11 }, { name: "Left Sleeve", w: 49, h: 79 }, { name: "Right Sleeve", w: 49, h: 79 }, { name: "Pocket", w: 18, h: 18 }] },
+  Sweater: { sections: [{ name: "Back", w: 76, h: 106 }, { name: "Front", w: 76, h: 106 }, { name: "Neckband", w: 55, h: 11 }, { name: "Left Sleeve", w: 49, h: 79 }, { name: "Right Sleeve", w: 49, h: 79 }] },
+  Cardigan: { sections: [{ name: "Back", w: 76, h: 106 }, { name: "Front Right", w: 43, h: 106 }, { name: "Front Left", w: 43, h: 106 }, { name: "Button Band", w: 8, h: 106 }, { name: "Neckband", w: 58, h: 11 }, { name: "Left Sleeve", w: 49, h: 79 }, { name: "Right Sleeve", w: 49, h: 79 }, { name: "Pocket", w: 18, h: 18 }] },
+  Pullover: { sections: [{ name: "Back", w: 76, h: 106 }, { name: "Front", w: 76, h: 106 }, { name: "Neckband", w: 55, h: 11 }, { name: "Left Sleeve", w: 49, h: 79 }, { name: "Right Sleeve", w: 49, h: 79 }] },
+  Vest: { sections: [{ name: "Back", w: 76, h: 100 }, { name: "Front", w: 76, h: 100 }, { name: "Neckband", w: 55, h: 9 }, { name: "Armhole Bands", w: 34, h: 9 }] },
+  "Tank Top": { sections: [{ name: "Back", w: 64, h: 88 }, { name: "Front", w: 64, h: 88 }, { name: "Neckband", w: 40, h: 8 }, { name: "Armhole Bands", w: 26, h: 8 }] },
   Hat: { sections: [{ name: "Hat Body", w: 60, h: 25 }, { name: "Brim", w: 60, h: 8 }] },
   Scarf: { sections: [{ name: "Scarf", w: 20, h: 80 }] },
+  Cowl: { sections: [{ name: "Cowl Body", w: 86, h: 52 }] },
   Socks: { sections: [{ name: "Leg", w: 36, h: 28 }, { name: "Heel Flap", w: 18, h: 14 }, { name: "Foot", w: 36, h: 22 }, { name: "Toe", w: 18, h: 12 }] },
   Mittens: { sections: [{ name: "Hand", w: 26, h: 32 }, { name: "Thumb", w: 12, h: 14 }, { name: "Cuff", w: 26, h: 10 }] },
+  Gloves: { sections: [{ name: "Hand", w: 26, h: 30 }, { name: "Fingers", w: 26, h: 12 }, { name: "Thumb", w: 12, h: 14 }, { name: "Cuff", w: 26, h: 10 }] },
   Shawl: { sections: [{ name: "Shawl Body", w: 70, h: 35 }] },
   "Baby Blanket": { sections: [{ name: "Blanket", w: 50, h: 60 }] },
+  "Throw Blanket": { sections: [{ name: "Blanket", w: 76, h: 110 }] },
+  "Tote Bag": { sections: [{ name: "Front", w: 46, h: 60 }, { name: "Back", w: 46, h: 60 }, { name: "Base", w: 46, h: 16 }, { name: "Straps", w: 8, h: 70 }] },
+  Dishcloth: { sections: [{ name: "Cloth", w: 32, h: 38 }] },
+  Headband: { sections: [{ name: "Headband", w: 70, h: 16 }] },
+  "Leg Warmers": { sections: [{ name: "Left Leg Warmer", w: 44, h: 70 }, { name: "Right Leg Warmer", w: 44, h: 70 }, { name: "Cuffs", w: 44, h: 11 }] },
 };
 
 export interface WizardConfig {
-  startingPoint: "image" | "text" | "chart" | null;
+  startingPoint: "text" | "photo-inspiration" | "photo-chart" | "import-chart" | null;
   imageFile: File | null;
   imagePreview: string | null;
   textDescription: string;
@@ -158,6 +168,7 @@ export interface WizardConfig {
   styleOption: string;
   stitchPreference: string;
   selectedColors: string[];
+  colorLimit: number;
 }
 
 export const GARMENT_TYPES = [

@@ -62,7 +62,7 @@ const GARMENT_REFERENCE: Record<string, QuickReferenceGroup[]> = {
       title: "Cardigan construction",
       items: [
         { title: "Button band", detail: "Pick up stitches evenly along each front edge after blocking. Work the band firmly (ribbing or seed stitch) so it does not flare or stretch." },
-        { title: "Collar", detail: "The neckline opening sits at the TOP of the garment. After joining shoulders, pick up around the neck opening and work your chosen collar (flat or stand-up)." },
+        { title: "Neckband or requested collar", detail: "The neckline opening sits at the TOP of the garment. After joining shoulders, pick up around the neck opening and work a neckband unless the style specifically asks for a shawl collar, hood, turtleneck, or other collar." },
         { title: "Buttons and buttonholes", detail: "Space buttonholes evenly from lower chest to collar. Mark button positions with pins before sewing, sew through both layers with a button loop at the back." },
         { title: "Pockets", detail: "Work as separate rectangles with firm ribbed tops. Block them, try the cardigan on, pin in position, then sew with mattress stitch from the inside." },
       ],
@@ -72,7 +72,7 @@ const GARMENT_REFERENCE: Record<string, QuickReferenceGroup[]> = {
     {
       title: "Sweater construction",
       items: [
-        { title: "Collar at top", detail: "The neckline belongs at the TOP. Work collar by picking up around the neck opening AFTER joining shoulder seams." },
+        { title: "Neckband at top", detail: "The neckline belongs at the TOP. For crew necks and V-necks, pick up around the neck opening after joining shoulder seams and work a neckband. Use a collar only when the style asks for one." },
         { title: "Sleeves and set-in armholes", detail: "Shape sleeve caps to fit the armhole curves. Pin the sleeve cap into the armhole and ease evenly before sewing." },
         { title: "Blocking before seaming", detail: "Block each piece to the listed measurements BEFORE seaming. Wet-block, pin to measurements, and let dry completely." },
       ],
@@ -164,20 +164,20 @@ export function getAssemblyInstructions(garmentType?: string): string[] {
   switch (garmentType) {
     case "Cardigan":
       return [
-        "Block every piece (back, left front, right front, sleeves, bands, collar, pockets) to the listed measurements. Pin to shape and let dry completely.",
+        "Block every piece (back, left front, right front, sleeves, bands, neckband or requested collar, pockets) to the listed measurements. Pin to shape and let dry completely.",
         "Join both shoulder seams using mattress stitch or three-needle bind-off, leaving the neckline opening clear.",
         "Set the sleeve caps into the armholes: pin the centre of the cap to the shoulder seam, pin the underarms, then ease the cap evenly around the armhole curve and sew.",
         "Sew sleeve seams from cuff to underarm. Sew side seams from hem to underarm.",
         "Attach button bands to the front edges. Pick up stitches evenly - use stitch markers to divide the band into equal sections before picking up.",
         "Sew on buttons directly opposite the buttonholes, reinforcing from behind with a small backing button if needed.",
-        "Attach the collar around the neckline with the shaped edge at the top.",
+        "Attach the neckband or requested collar around the neckline with the shaped edge at the top.",
         "Sew pockets in place after trying the cardigan on to confirm their position. Weave in all ends and steam lightly.",
       ];
     case "Sweater":
     case "Pullover":
       return [
-        "Block the back, front, sleeves, and collar pieces to the listed measurements.",
-        "Join one shoulder seam. Pick up and work the collar around the neckline, then join the second shoulder seam.",
+        "Block the back, front, sleeves, and neckband pieces to the listed measurements.",
+        "Join one shoulder seam. Pick up and work the neckband around the neckline, then join the second shoulder seam.",
         "Set sleeves into armholes, pinning and easing the cap evenly.",
         "Sew sleeve seams, then sew side seams from hem to underarm.",
         "Weave in all ends and block the finished garment again if needed.",

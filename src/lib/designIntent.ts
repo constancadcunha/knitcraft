@@ -66,6 +66,10 @@ export function inferChartPalette(text: string): string[] {
     return ["#1d2f6f", "#ffd166", "#6aa6ff", "#ffffff", "#251a1c"];
   }
 
+  if (hasMonet(motifText)) {
+    return ["#dbe9df", "#6a9470", "#6e88a8", "#f08aa0", "#ffd166", "#ffffff", "#2e5d50"];
+  }
+
   if (main) palette.push(main.hex);
   else if (/star|celestial|moon|sun|spark/.test(motifText) && /stripe|striped|stripes/.test(motifText)) palette.push("#ffffff");
   else if (/night|goth|dark|black/.test(motifText)) palette.push("#251a1c");
@@ -107,20 +111,57 @@ export function designTextFromParts(parts: Array<string | undefined | null>): st
   return parts.filter(Boolean).join(" ").trim();
 }
 
+function hasNegatedWord(text: string, wordPattern: string): boolean {
+  return new RegExp(`\\b(no|not|without|skip|avoid|remove)\\s+(?:any\\s+)?(?:${wordPattern})\\b`).test(text);
+}
+
 export function hasMotif(text: string, motif: "flower" | "heart" | "star" | "stripe" | "checker" | "wave" | "diamond" | "speckle") {
   const lower = text.toLowerCase();
   switch (motif) {
-    case "flower": return /flower|floral|daisy|rose|garden|bloom/.test(lower);
-    case "heart": return /heart|love|sweet|valentine/.test(lower);
-    case "star": return /star|celestial|night|moon|spark|sun/.test(lower);
-    case "stripe": return /stripe|striped|stripes/.test(lower);
-    case "checker": return /check|checked|checker|plaid|gingham/.test(lower);
-    case "wave": return /wave|wavy|ocean|ripple/.test(lower);
-    case "diamond": return /argyle|diamond|fair isle|fairisle/.test(lower);
-    case "speckle": return /speckle|speckled|dotted|dot|dots/.test(lower);
+    case "flower": return !hasNegatedWord(lower, "flowers?|floral|dais(?:y|ies)|roses?|blooms?") && /flower|floral|daisy|rose|garden|bloom/.test(lower);
+    case "heart": return !hasNegatedWord(lower, "hearts?|love|valentine") && /\b(heart|hearts|valentine)\b/.test(lower);
+    case "star": return !hasNegatedWord(lower, "stars?|moons?|celestial|sparkles?|sun") && /star|celestial|night sky|moon|spark|sun/.test(lower);
+    case "stripe": return !hasNegatedWord(lower, "stripes?|striped") && /stripe|striped|stripes/.test(lower);
+    case "checker": return !hasNegatedWord(lower, "checks?|checked|checker|plaid|gingham") && /check|checked|checker|plaid|gingham/.test(lower);
+    case "wave": return !hasNegatedWord(lower, "waves?|wavy|ocean|ripple") && /wave|wavy|ocean|ripple/.test(lower);
+    case "diamond": return !hasNegatedWord(lower, "diamonds?|argyle|fair isle|fairisle") && /argyle|diamond|fair isle|fairisle/.test(lower);
+    case "speckle": return !hasNegatedWord(lower, "speckles?|speckled|dots?|dotted") && /speckle|speckled|dotted|dot|dots/.test(lower);
   }
 }
 
 export function hasStarryNight(text: string): boolean {
   return /van gogh|starry night|swirl|swirly|night sky/.test(text.toLowerCase());
+}
+
+export function hasMonet(text: string): boolean {
+  return /monet|impressionis|water\s*lil(?:y|ies)|lily pond|garden pond|bridge over a pond|water garden/.test(text.toLowerCase());
+}
+
+export type IconMotif =
+  | "penguin"
+  | "cat"
+  | "dog"
+  | "moon"
+  | "sun"
+  | "cloud"
+  | "mountain"
+  | "mushroom"
+  | "bow"
+  | "book"
+  | "butterfly";
+
+export function detectIconMotif(text: string): IconMotif | null {
+  const lower = text.toLowerCase();
+  if (/penguin/.test(lower)) return "penguin";
+  if (/\bcat|kitten|kitty/.test(lower)) return "cat";
+  if (/\bdog|puppy/.test(lower)) return "dog";
+  if (/\bmoon|crescent/.test(lower)) return "moon";
+  if (/\bsun|sunshine/.test(lower)) return "sun";
+  if (/\bcloud|cloudy/.test(lower)) return "cloud";
+  if (/\bmountain|peaks?|landscape/.test(lower)) return "mountain";
+  if (/\bmushroom|toadstool/.test(lower)) return "mushroom";
+  if (/\bbow|ribbon/.test(lower)) return "bow";
+  if (/\bbook|novel|library|reader|reading/.test(lower)) return "book";
+  if (/\bbutterfly|moth/.test(lower)) return "butterfly";
+  return null;
 }

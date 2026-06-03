@@ -19,6 +19,20 @@ const SHAPE_FUNCTIONS: Record<string, ShapeFn> = {
     }
     return true;
   },
+  sweaterBackHighNeck: (row, col, w, h) => {
+    const armholeEnd = Math.max(1, Math.floor(h * 0.30));
+    if (row < armholeEnd) {
+      const t = row / armholeEnd;
+      const cut = Math.round((1 - t) * w * 0.14);
+      if (col < cut || col >= w - cut) return false;
+    }
+    if (row < Math.floor(h * 0.07)) {
+      const neckW = Math.round(w * 0.22);
+      const neckL = Math.floor((w - neckW) / 2);
+      if (col >= neckL && col < neckL + neckW) return false;
+    }
+    return true;
+  },
   sweaterFront: (row, col, w, h) => {
     const armholeEnd = Math.max(1, Math.floor(h * 0.30));
     if (row < armholeEnd) {
@@ -30,6 +44,22 @@ const SHAPE_FUNCTIONS: Record<string, ShapeFn> = {
     if (row < neckDepth) {
       const t = row / neckDepth;
       const neckHalf = Math.round((1 - t) * w * 0.20);
+      const center = Math.floor(w / 2);
+      if (Math.abs(col - center) <= neckHalf) return false;
+    }
+    return true;
+  },
+  sweaterFrontHighNeck: (row, col, w, h) => {
+    const armholeEnd = Math.max(1, Math.floor(h * 0.30));
+    if (row < armholeEnd) {
+      const t = row / armholeEnd;
+      const cut = Math.round((1 - t) * w * 0.14);
+      if (col < cut || col >= w - cut) return false;
+    }
+    const neckDepth = Math.max(1, Math.floor(h * 0.13));
+    if (row < neckDepth) {
+      const t = row / neckDepth;
+      const neckHalf = Math.round((1 - t) * w * 0.14);
       const center = Math.floor(w / 2);
       if (Math.abs(col - center) <= neckHalf) return false;
     }
@@ -128,13 +158,26 @@ const SECTION_SHAPE_MAP: Record<string, string> = {
   "Sweater__Back": "sweaterBack",
   "Sweater__Front": "sweaterFront",
   "Sweater__Collar": "collar",
+  "Sweater__Neckband": "collar",
+  "Sweater__Turtleneck Collar": "collar",
   "Sweater__Left Sleeve": "sleeve",
   "Sweater__Right Sleeve": "sleeve",
+  "Pullover__Back": "sweaterBack",
+  "Pullover__Front": "sweaterFront",
+  "Pullover__Neckband": "collar",
+  "Pullover__Turtleneck Collar": "collar",
+  "Pullover__Left Sleeve": "sleeve",
+  "Pullover__Right Sleeve": "sleeve",
   "Cardigan__Back": "sweaterBack",
   "Cardigan__Front Right": "cardiganFrontRight",
   "Cardigan__Front Left": "cardiganFrontLeft",
   "Cardigan__Button Band": "rect",
+  "Cardigan__Front Bands": "rect",
   "Cardigan__Collar": "collar",
+  "Cardigan__Neckband": "collar",
+  "Cardigan__Shawl Collar": "collar",
+  "Cardigan__Turtleneck Collar": "collar",
+  "Cardigan__Hood": "rect",
   "Cardigan__Left Sleeve": "sleeve",
   "Cardigan__Right Sleeve": "sleeve",
   "Cardigan__Pocket": "pocket",

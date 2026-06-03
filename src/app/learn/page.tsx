@@ -5,6 +5,7 @@ import {
   BookOpen, ExternalLink, PlayCircle, Bookmark, BookmarkCheck, X, ChevronRight,
 } from "lucide-react";
 import { STITCH_LIBRARY } from "@/lib/craftKnowledge";
+import { stitchDisplayImage, stitchVideoEmbedUrl, techniqueDisplayImage } from "@/lib/stitchImages";
 import type { CraftType } from "@/types";
 
 type Section = "all" | "stitches" | "charts" | "essentials" | "saved";
@@ -530,7 +531,8 @@ function StitchCard({
   onOpen: () => void;
   onToggleSave: () => void;
 }) {
-  const [imgSrc, setImgSrc] = useState(stitch.imageUrl);
+  const heroImage = stitchDisplayImage(stitch);
+  const [imgSrc, setImgSrc] = useState(heroImage);
   const fallback = makeFallbackSvg(stitch.name, FALLBACK_COLORS[stitch.id] ?? "#8b6347");
 
   return (
@@ -553,7 +555,7 @@ function StitchCard({
         <img
           src={imgSrc}
           alt={stitch.name}
-          className="h-36 w-full object-contain bg-white p-3 hover:opacity-90 transition-opacity"
+          className="h-36 w-full object-cover bg-white hover:opacity-90 transition-opacity"
           onError={() => setImgSrc(fallback)}
           loading="lazy"
         />
@@ -633,7 +635,8 @@ function StitchPopup({
   onToggleSave: () => void;
   onClose: () => void;
 }) {
-  const [imgSrc, setImgSrc] = useState(stitch.imageUrl);
+  const heroImage = stitchDisplayImage(stitch);
+  const [imgSrc, setImgSrc] = useState(heroImage);
   const fallback = makeFallbackSvg(stitch.name, FALLBACK_COLORS[stitch.id] ?? "#8b6347");
 
   // Close on Escape
@@ -650,7 +653,8 @@ function StitchPopup({
   }, []);
 
   const youtubeUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(stitch.videoQuery)}`;
-  const tutorialImages = stitch.tutorialImages?.filter((src) => src !== stitch.imageUrl) ?? [];
+  const youtubeEmbed = stitchVideoEmbedUrl(stitch);
+  const tutorialImages = (stitch.tutorialImages ?? []).filter((src) => src.startsWith("http"));
 
   return (
     <div
@@ -695,12 +699,12 @@ function StitchPopup({
 
         {/* Body */}
         <div className="p-5 space-y-5">
-          {/* Chart notation diagram */}
+          {/* Stitch/fabric reference */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={imgSrc}
-            alt={`${stitch.name} chart notation`}
-            className="w-full max-h-44 object-contain bg-white rounded-xl border-2 border-[#e8ddd0] p-3"
+            alt={`${stitch.name} fabric reference`}
+            className="w-full max-h-44 object-cover bg-white rounded-xl border-2 border-[#e8ddd0]"
             onError={() => setImgSrc(fallback)}
           />
 
@@ -722,7 +726,7 @@ function StitchPopup({
 
           {tutorialImages.length ? (
             <div>
-              <p className="text-xs font-black text-[#251a1c] mb-2">How-to diagram</p>
+              <p className="text-xs font-black text-[#251a1c] mb-2">How-to images</p>
               <div className="grid gap-2 grid-cols-1 sm:grid-cols-3">
                 {tutorialImages.map((src, i) => (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -738,6 +742,28 @@ function StitchPopup({
               </div>
             </div>
           ) : null}
+
+          <div>
+            <p className="text-xs font-black text-[#251a1c] mb-2">Video tutorial</p>
+            {youtubeEmbed ? (
+              <iframe
+                title={`${stitch.name} video tutorial`}
+                src={youtubeEmbed}
+                className="h-56 w-full rounded-xl border-2 border-[#251a1c] bg-white"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+              />
+            ) : (
+              <a
+                href={youtubeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex h-32 w-full items-center justify-center rounded-xl border-2 border-[#251a1c] bg-[#fff0bf] px-4 text-center text-sm font-black text-[#251a1c] hover:bg-[#ffd166]"
+              >
+                Open a YouTube tutorial for this stitch
+              </a>
+            )}
+          </div>
 
           {/* Video + source actions */}
           <div className="flex flex-wrap gap-3 pt-1">
@@ -766,19 +792,7 @@ function StitchPopup({
 }
 
 function techniqueImage(item: typeof ESSENTIALS[0]): string {
-  const stitch =
-    item.title.includes("Reading flat") ? STITCH_LIBRARY.find((s) => s.id === "stockinette") :
-    item.title.includes("Reading crochet") ? STITCH_LIBRARY.find((s) => s.id === "single-crochet") :
-    item.title.includes("Foundation") ? STITCH_LIBRARY.find((s) => s.id === "single-crochet") :
-    item.title.includes("Turning") ? STITCH_LIBRARY.find((s) => s.id === "half-double-crochet") :
-    item.title.includes("round") ? STITCH_LIBRARY.find((s) => s.id === "magic-ring") :
-    item.title.includes("pocket") ? STITCH_LIBRARY.find((s) => s.id === "ribbing") :
-    item.title.includes("Picking") ? STITCH_LIBRARY.find((s) => s.id === "stockinette") :
-    item.title.includes("Mattress") || item.title.includes("Seaming") ? STITCH_LIBRARY.find((s) => s.id === "slipped-stitch" || s.id === "slip-stitch-crochet") :
-    item.craftType === "knitting" ? STITCH_LIBRARY.find((s) => s.id === "knit") :
-    STITCH_LIBRARY.find((s) => s.id === "single-crochet");
-
-  return stitch?.imageUrl ?? makeFallbackSvg(item.title, item.craftType === "knitting" ? "#8b6347" : "#6a9470");
+  return techniqueDisplayImage(item.title, item.craftType);
 }
 
 /* EssentialCard */
@@ -795,8 +809,8 @@ function EssentialCard({
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={techniqueImage(item)}
-        alt={`${item.title} diagram`}
-        className="mb-3 h-24 w-full rounded-lg border-2 border-[#251a1c] bg-white object-contain p-2"
+        alt={`${item.title} tutorial reference`}
+        className="mb-3 h-24 w-full rounded-lg border-2 border-[#251a1c] bg-white object-cover"
         loading="lazy"
       />
       <h3 className="mb-1 text-sm font-black text-[#251a1c]">{item.title}</h3>

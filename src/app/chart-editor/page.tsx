@@ -10,40 +10,12 @@ import { getShapeKey, isActiveChartCell, type RowShaping } from "@/lib/shapes";
 import { getAssemblyInstructions, getQuickReference } from "@/lib/projectGuides";
 import { buildGaugeTemplate, GARMENT_SIZES, type GarmentSize, gaugeForCraft, SIZE_H_SCALE, SIZE_W_SCALE } from "@/lib/craftKnowledge";
 import { buildStarterGrid, createProjectGuideCharts, DEFAULT_CHART_COLORS, makeGrid } from "@/lib/chartFactory";
+import { imagePreviewToChart } from "@/lib/imageChart";
+import { GarmentIcon } from "@/components/GarmentIcon";
 import {
   Pencil, Eraser, PaintBucket, Undo2, Trash2, Download, Save,
-  ArrowLeft, ChevronRight, Check, Play, Plus, X, LayoutGrid,
+  ArrowLeft, ChevronRight, Check, Play, Plus, X, LayoutGrid, Upload,
 } from "lucide-react";
-
-function GarmentIconSmall({ type, active }: { type: string; active: boolean }) {
-  const c = active ? "#8b6347" : "#c4a07e";
-  const fo = active ? "0.18" : "0.1";
-  const sw = "1.8";
-  switch (type) {
-    case "Sweater":
-      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><path d="M14 5 Q15 11 20 11 Q25 11 26 5 L32 7.5 L37 21 L30 21 L30 34 L10 34 L10 21 L3 21 L8 7.5 Z" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/></svg>;
-    case "Cardigan":
-      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><path d="M14 5 L8 7.5 L3 21 L10 21 L10 34 L19.5 34 L19.5 11" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/><path d="M26 5 L32 7.5 L37 21 L30 21 L30 34 L20.5 34 L20.5 11" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/><line x1="20" y1="11" x2="20" y2="34" stroke={c} strokeWidth="1" strokeDasharray="2 1.5"/></svg>;
-    case "Hat": case "Hat / Beanie":
-      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><path d="M9 27 C9 16 31 16 31 27 Z" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/><rect x="7" y="26" width="26" height="5" rx="2.5" fill={c} fillOpacity="0.2" stroke={c} strokeWidth={sw}/></svg>;
-    case "Scarf":
-      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><rect x="14" y="3" width="12" height="30" rx="6" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw}/></svg>;
-    case "Socks":
-      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><path d="M15 4 L15 22 Q15 30 25 30 Q33 30 33 23 Q33 19 27 19 L25 19 L25 4 Z" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/></svg>;
-    case "Mittens":
-      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><path d="M10 30 L10 14 Q10 7 15 7 Q20 7 20 14 L20 30 Z" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/><path d="M20 17 Q22 13 25 14 Q28 15 25 19 L20 21" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/></svg>;
-    case "Shawl":
-      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><path d="M20 6 L4 31 L36 31 Z" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/></svg>;
-    case "Baby Blanket": case "Throw Blanket":
-      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><rect x="4" y="4" width="32" height="28" rx="3" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw}/><line x1="4" y1="13" x2="36" y2="13" stroke={c} strokeWidth="0.8" strokeDasharray="3 2"/><line x1="4" y1="22" x2="36" y2="22" stroke={c} strokeWidth="0.8" strokeDasharray="3 2"/></svg>;
-    case "Cowl":
-      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><ellipse cx="20" cy="18" rx="14" ry="11" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw}/><ellipse cx="20" cy="18" rx="8" ry="6" fill="white" stroke={c} strokeWidth={sw}/></svg>;
-    case "Vest":
-      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><path d="M13 5 Q14 10 20 10 Q26 10 27 5 L32 10 L30 34 L10 34 L8 10 Z" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/></svg>;
-    default:
-      return <svg viewBox="0 0 40 36" fill="none" className="w-full h-full"><rect x="6" y="6" width="28" height="24" rx="5" fill={c} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeDasharray="4 2"/></svg>;
-  }
-}
 
 const CELL_SIZE = 16;
 const MIN_GRID = 5;
@@ -116,6 +88,7 @@ function ChartEditorContent() {
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const colorInputRef = useRef<HTMLInputElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const sectionDraftsRef = useRef(sectionDrafts);
 
   useEffect(() => {
@@ -321,6 +294,34 @@ function ChartEditorContent() {
     link.click();
   };
 
+  const importChartImage = (file: File | undefined) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const preview = reader.result as string;
+      void imagePreviewToChart(preview, {
+        maxWidth: Math.min(MAX_GRID, Math.max(24, gridW)),
+        maxHeight: Math.min(MAX_GRID, Math.max(24, gridH)),
+        maxColors: Math.min(10, colors.length || 10),
+        crop: "none",
+      }).then((chart) => {
+        pushHistory();
+        setGridW(chart.grid[0]?.length ?? gridW);
+        setGridH(chart.grid.length || gridH);
+        setCells(chart.grid);
+        setColors(chart.colors.length ? chart.colors : colors);
+        setCurrentShapeKey(undefined);
+        setRowShaping(undefined);
+        setTemplateKey(null);
+        setProjectId(null);
+        setChartName(file.name.replace(/\.[^.]+$/, "") || "Imported chart");
+        setCurrentChartId(null);
+        setSetupComplete(true);
+      }).catch(() => setTemplateMsg("Could not import that chart image."));
+    };
+    reader.readAsDataURL(file);
+  };
+
   const ensureProject = (garmentKey: string | null | undefined = templateKey, size: GarmentSize = templateSize) => {
     if (!garmentKey) return projectId;
     const nextProjectId = projectId ?? generateId();
@@ -413,9 +414,12 @@ function ChartEditorContent() {
 
   const handleSaveAndTrack = () => {
     if (templateKey) {
+      const alreadyTracking = projectId
+        ? charts.some((chart) => chart.projectId === projectId && Object.keys(chart.completedCells ?? {}).length > 0)
+        : false;
       const firstStepId = saveAllSections();
       if (firstStepId) {
-        router.push(`/chart/${firstStepId}`);
+        router.push(alreadyTracking && currentChartId ? `/chart/${currentChartId}` : `/chart/${firstStepId}`);
         return;
       }
     }
@@ -724,7 +728,7 @@ function ChartEditorContent() {
                     }`}
                   >
                     <div className="w-10 h-9">
-                      <GarmentIconSmall type={key} active={templateKey === key} />
+                      <GarmentIcon type={key} active={templateKey === key} className="h-9 w-10" />
                     </div>
                     <span className="text-[10px] font-semibold text-[#2e1f14] leading-tight text-center line-clamp-2">
                       {key}
@@ -904,6 +908,22 @@ function ChartEditorContent() {
               </div>
             )}
 
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(event) => importChartImage(event.target.files?.[0])}
+            />
+            <button
+              onClick={() => importInputRef.current?.click()}
+              className="w-full py-3 rounded-2xl border-2 border-[#251a1c] bg-[#fff0bf] text-sm font-black text-[#251a1c] transition-all shadow-md hover:-translate-y-0.5"
+            >
+              <span className="inline-flex items-center justify-center gap-2">
+                <Upload size={15} /> Import existing chart
+              </span>
+            </button>
+
             {/* Start button */}
             <button
               onClick={() => {
@@ -945,6 +965,13 @@ function ChartEditorContent() {
         <div className="flex flex-col lg:flex-row gap-5">
           {/* SIDEBAR */}
           <div className="lg:w-[260px] flex flex-col gap-4 shrink-0">
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(event) => importChartImage(event.target.files?.[0])}
+            />
 
             {/* Chart name */}
             <div className="glass rounded-2xl border border-white/60 shadow-md p-4">
@@ -968,6 +995,13 @@ function ChartEditorContent() {
                   />
                 </>
               )}
+              <button
+                type="button"
+                onClick={() => importInputRef.current?.click()}
+                className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border-2 border-[#251a1c] bg-[#fff0bf] px-3 py-2 text-xs font-black text-[#251a1c]"
+              >
+                <Upload size={13} /> Import chart image
+              </button>
             </div>
 
             {/* Garment template */}
@@ -1067,9 +1101,7 @@ function ChartEditorContent() {
                         : "border-[#e2d0bb]/60 hover:bg-white/60 glass"
                     }`}
                   >
-                    <div className={`w-5 h-5 rounded flex items-center justify-center text-[8px] font-black ${templateKey === key ? "bg-[#8b6347] text-white" : "bg-[#ecdccb] text-[#8b6347]"}`}>
-                      {key.slice(0, 2).toUpperCase()}
-                    </div>
+                    <GarmentIcon type={key} active={templateKey === key} className="h-7 w-7" />
                     <span className="text-[8px] font-semibold text-[#8b6347] leading-tight line-clamp-1">
                       {key.replace(" Blanket", "").replace("Baby ", "Baby\n")}
                     </span>

@@ -1,4 +1,5 @@
 import type { CraftType, GarmentTemplate, QuickReferenceGroup } from "@/types";
+import { stitchDisplayImage } from "@/lib/stitchImages";
 
 export type GarmentSize = "XS" | "S" | "M" | "L" | "XL" | "2XL";
 
@@ -6,8 +7,9 @@ export const GARMENT_SIZES: GarmentSize[] = ["XS", "S", "M", "L", "XL", "2XL"];
 export const SIZE_W_SCALE: Record<GarmentSize, number> = { XS: 0.71, S: 0.81, M: 0.91, L: 1, XL: 1.1, "2XL": 1.19 };
 export const SIZE_H_SCALE: Record<GarmentSize, number> = { XS: 0.82, S: 0.86, M: 0.94, L: 1, XL: 1.06, "2XL": 1.1 };
 
-// Finished garment bust measurements (with positive ease already included).
-// L = 42" bust so 76 stitches at chunky gauge = Large back panel.
+// Finished garment bust measurements follow the Craft Yarn Council women's
+// chest ranges, using the upper value of each range as the finished baseline.
+// L = 42" bust, so 76 stitches at chunky gauge = Large back panel.
 export const SIZE_PROFILES: Record<GarmentSize, { bust: number; length: number; sleeve: number }> = {
   XS:  { bust: 30, length: 20,   sleeve: 15.5 },
   S:   { bust: 34, length: 21,   sleeve: 16.5 },
@@ -843,8 +845,8 @@ export function buildGaugeTemplate(craftType: CraftType): Record<string, Garment
   const gloveH = Math.round(7.5 * rows);
 
   return {
-    Sweater: { sections: [{ name: "Back", w: backW, h: bodyH }, { name: "Front", w: backW, h: bodyH }, { name: "Collar", w: Math.round(backW * 0.72), h: Math.round(rows * 2.5) }, { name: "Left Sleeve", w: sleeveW, h: sleeveH }, { name: "Right Sleeve", w: sleeveW, h: sleeveH }] },
-    Cardigan: { sections: [{ name: "Back", w: backW, h: bodyH }, { name: "Front Right", w: frontW, h: bodyH }, { name: "Front Left", w: frontW, h: bodyH }, { name: "Button Band", w: Math.max(8, Math.round(sts * 2)), h: bodyH }, { name: "Collar", w: Math.round(backW * 0.76), h: Math.round(rows * 2.5) }, { name: "Left Sleeve", w: sleeveW, h: sleeveH }, { name: "Right Sleeve", w: sleeveW, h: sleeveH }, { name: "Pocket", w: Math.round(sts * 5), h: Math.round(rows * 4) }] },
+    Sweater: { sections: [{ name: "Back", w: backW, h: bodyH }, { name: "Front", w: backW, h: bodyH }, { name: "Neckband", w: Math.round(backW * 0.72), h: Math.round(rows * 2.5) }, { name: "Left Sleeve", w: sleeveW, h: sleeveH }, { name: "Right Sleeve", w: sleeveW, h: sleeveH }] },
+    Cardigan: { sections: [{ name: "Back", w: backW, h: bodyH }, { name: "Front Right", w: frontW, h: bodyH }, { name: "Front Left", w: frontW, h: bodyH }, { name: "Button Band", w: Math.max(8, Math.round(sts * 2)), h: bodyH }, { name: "Neckband", w: Math.round(backW * 0.76), h: Math.round(rows * 2.5) }, { name: "Left Sleeve", w: sleeveW, h: sleeveH }, { name: "Right Sleeve", w: sleeveW, h: sleeveH }, { name: "Pocket", w: Math.round(sts * 5), h: Math.round(rows * 4) }] },
     Vest: { sections: [{ name: "Back", w: backW, h: vestH }, { name: "Front", w: backW, h: vestH }, { name: "Neckband", w: Math.round(backW * 0.72), h: Math.round(rows * 2) }, { name: "Armhole Bands", w: Math.round(backW * 0.44), h: Math.round(rows * 2) }] },
     "Tank Top": { sections: [{ name: "Back", w: backW, h: vestH }, { name: "Front", w: backW, h: vestH }, { name: "Neckband", w: Math.round(backW * 0.62), h: Math.round(rows * 1.8) }, { name: "Armhole Bands", w: Math.round(backW * 0.38), h: Math.round(rows * 1.8) }] },
     Hat: { sections: [{ name: "Hat Body", w: Math.round(20 * sts), h: Math.round(8 * rows) }, { name: "Brim", w: Math.round(20 * sts), h: Math.round(2.5 * rows) }] },
@@ -867,21 +869,26 @@ export function getStitchGraph(craftType: CraftType) {
   return STITCH_LIBRARY.filter((entry) => entry.craftType === craftType);
 }
 
+function lessonImage(craftType: CraftType, id: string): string | undefined {
+  const entry = getStitchGraph(craftType).find((item) => item.id === id);
+  return entry ? stitchDisplayImage(entry) : undefined;
+}
+
 export function getRibbingReference(craftType: CraftType): QuickReferenceGroup {
   return craftType === "crocheting"
     ? {
         title: "Crochet ribbing",
         items: [
-          { title: "Back-loop sc rib (most common)", detail: "Work single crochet through the back loop only, turning each row. Work sideways to the needed length, then join the short edges to cuffs, hems, collars, or bands with a slip-stitch seam.", imageUrl: DIAGS.blobRib, sourceUrl: "/learn#learn-crochet-ribbing" },
-          { title: "Front/back-post rib", detail: "Alternate FPdc and BPdc for a raised, stretchy post-stitch rib. Great for cuffs and collars - the posts grip the fabric and prevent flaring.", imageUrl: DIAGS.dcAll, sourceUrl: "/learn#learn-crochet-ribbing" },
+          { title: "Back-loop sc rib (most common)", detail: "Work single crochet through the back loop only, turning each row. Work sideways to the needed length, then join the short edges to cuffs, hems, collars, or bands with a slip-stitch seam.", imageUrl: lessonImage("crocheting", "crochet-ribbing"), sourceUrl: "/learn#learn-crochet-ribbing" },
+          { title: "Front/back-post rib", detail: "Alternate FPdc and BPdc for a raised, stretchy post-stitch rib. Great for cuffs and collars - the posts grip the fabric and prevent flaring.", imageUrl: lessonImage("crocheting", "double-crochet"), sourceUrl: "/learn#learn-crochet-ribbing" },
           { title: "How ribbing fits in", detail: "For a cardigan: work the rib band separately and join it to the hem and cuffs. The rib height is typically 2-3 inches (5-7.5 cm).", sourceUrl: "/learn#learn-crochet-ribbing" },
         ],
       }
     : {
         title: "Knitted ribbing",
         items: [
-          { title: "1x1 rib - *k1, p1*", detail: "Alternate one knit and one purl stitch across. On subsequent rows, knit the knits and purl the purls as they face you. Elastic and tidy - perfect for all edges.", imageUrl: DIAGS.rib1x1, sourceUrl: "/learn#learn-ribbing" },
-          { title: "2x2 rib - *k2, p2*", detail: "Bolder, stretchier columns. Keep the knit columns directly above the knit columns from the previous row. Most common for cuffs and hems on chunky garments.", imageUrl: DIAGS.rib2x2, sourceUrl: "/learn#learn-ribbing" },
+          { title: "1x1 rib - *k1, p1*", detail: "Alternate one knit and one purl stitch across. On subsequent rows, knit the knits and purl the purls as they face you. Elastic and tidy - perfect for all edges.", imageUrl: lessonImage("knitting", "ribbing"), sourceUrl: "/learn#learn-ribbing" },
+          { title: "2x2 rib - *k2, p2*", detail: "Bolder, stretchier columns. Keep the knit columns directly above the knit columns from the previous row. Most common for cuffs and hems on chunky garments.", imageUrl: lessonImage("knitting", "ribbing"), sourceUrl: "/learn#learn-ribbing" },
           { title: "How ribbing fits in", detail: "For a cardigan: cast on the hem, work 1-2 inches of ribbing, then switch to stockinette. For cuffs: cast on fewer stitches in rib, then increase when you switch to the sleeve body.", sourceUrl: "/learn#learn-ribbing" },
         ],
       };

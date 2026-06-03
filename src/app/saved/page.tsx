@@ -44,7 +44,7 @@ export default function SavedPage() {
           </TabButton>
         </div>
 
-        {tab === "patterns" && <PatternsTab patterns={patterns} onDelete={deletePattern} />}
+        {tab === "patterns" && <PatternsTab patterns={patterns} charts={charts} onDelete={deletePattern} />}
         {tab === "charts" && <ChartsTab charts={manualCharts} onDelete={deleteChart} />}
       </div>
     </div>
@@ -66,7 +66,7 @@ function TabButton({ active, onClick, children, icon }: {
   );
 }
 
-function PatternsTab({ patterns, onDelete }: { patterns: Pattern[]; onDelete: (id: string) => void }) {
+function PatternsTab({ patterns, charts, onDelete }: { patterns: Pattern[]; charts: SavedChart[]; onDelete: (id: string) => void }) {
   const router = useRouter();
 
   if (patterns.length === 0) {
@@ -82,29 +82,52 @@ function PatternsTab({ patterns, onDelete }: { patterns: Pattern[]; onDelete: (i
     );
   }
 
+  const withProgress = patterns.map((pattern) => ({
+    pattern,
+    progress: patternProgress(pattern, charts),
+  }));
+  const complete = withProgress.filter((item) => item.progress.total > 0 && item.progress.percent === 100);
+  const inProgress = withProgress.filter((item) => item.progress.total === 0 || item.progress.percent < 100);
+
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-      {patterns.map((p) => (
-        <PatternCard
-          key={p.id}
-          pattern={p}
-          onOpen={() => router.push(p.firstChartId ? `/chart/${p.firstChartId}` : `/pattern/${p.id}`)}
-          onOpenText={() => router.push(`/pattern/${p.id}`)}
-          onDelete={() => onDelete(p.id)}
-        />
-      ))}
+    <div className="space-y-7">
+      <LibrarySection title="In progress" count={inProgress.length}>
+        {inProgress.map(({ pattern, progress }) => (
+          <PatternCard
+            key={pattern.id}
+            pattern={pattern}
+            progress={progress.percent}
+            onOpen={() => router.push(pattern.firstChartId ? `/chart/${pattern.firstChartId}` : `/pattern/${pattern.id}`)}
+            onOpenText={() => router.push(`/pattern/${pattern.id}`)}
+            onDelete={() => onDelete(pattern.id)}
+          />
+        ))}
+      </LibrarySection>
+      <LibrarySection title="Complete" count={complete.length}>
+        {complete.map(({ pattern, progress }) => (
+          <PatternCard
+            key={pattern.id}
+            pattern={pattern}
+            progress={progress.percent}
+            onOpen={() => router.push(pattern.firstChartId ? `/chart/${pattern.firstChartId}` : `/pattern/${pattern.id}`)}
+            onOpenText={() => router.push(`/pattern/${pattern.id}`)}
+            onDelete={() => onDelete(pattern.id)}
+          />
+        ))}
+      </LibrarySection>
     </div>
   );
 }
 
-function PatternCard({ pattern, onOpen, onOpenText, onDelete }: { pattern: Pattern; onOpen: () => void; onOpenText: () => void; onDelete: () => void }) {
+function PatternCard({ pattern, progress, onOpen, onOpenText, onDelete }: {
+  pattern: Pattern;
+  progress: number;
+  onOpen: () => void;
+  onOpenText: () => void;
+  onDelete: () => void;
+}) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const totalRows = pattern.sections.reduce((acc, s) => acc + s.instructions.length, 0);
-  const completedRowsCount = Object.values(pattern.completedRows).reduce(
-    (acc, sectionRows) => acc + Object.values(sectionRows).filter(Boolean).length, 0
-  );
-  const progress = totalRows > 0 ? Math.round((completedRowsCount / totalRows) * 100) : 0;
   const currentSection = pattern.sections[pattern.currentSection ?? 0];
   const hasChartTracker = !!pattern.firstChartId;
 
@@ -196,12 +219,15 @@ function ChartsTab({ charts, onDelete }: { charts: SavedChart[]; onDelete: (id: 
   ).map((group) => group.sort((a, b) => (a.sectionIndex ?? 999) - (b.sectionIndex ?? 999)));
   const projectChartIds = new Set(projectGroups.flat().map((chart) => chart.id));
   const looseCharts = charts.filter((chart) => !projectChartIds.has(chart.id));
+  const completeProjects = projectGroups.filter((group) => chartGroupProgress(group).percent === 100);
+  const inProgressProjects = projectGroups.filter((group) => chartGroupProgress(group).percent < 100);
+  const completeLoose = looseCharts.filter((chart) => chartProgress(chart).percent === 100);
+  const inProgressLoose = looseCharts.filter((chart) => chartProgress(chart).percent < 100);
 
   return (
     <div className="space-y-5">
-      {projectGroups.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {projectGroups.map((group) => {
+      <LibrarySection title="In progress" count={inProgressProjects.length + inProgressLoose.length} columns="grid-cols-1 lg:grid-cols-2">
+        {inProgressProjects.map((group) => {
             const editableChart = group.find((chart) => chart.sectionRole === "chart") ?? group[0];
             return (
               <ChartProjectCard
@@ -212,19 +238,33 @@ function ChartsTab({ charts, onDelete }: { charts: SavedChart[]; onDelete: (id: 
                 onDelete={() => group.forEach((chart) => onDelete(chart.id))}
               />
             );
-          })}
-        </div>
-      )}
+        })}
+        {inProgressLoose.map((chart) => (
+          <ChartCard key={chart.id} chart={chart}
+            onEdit={() => router.push(`/chart-editor?load=${chart.id}`)}
+            onDelete={() => onDelete(chart.id)} />
+        ))}
+      </LibrarySection>
 
-      {looseCharts.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-          {looseCharts.map((chart) => (
-            <ChartCard key={chart.id} chart={chart}
-              onEdit={() => router.push(`/chart-editor?load=${chart.id}`)}
-              onDelete={() => onDelete(chart.id)} />
-          ))}
-        </div>
-      )}
+      <LibrarySection title="Complete" count={completeProjects.length + completeLoose.length} columns="grid-cols-1 lg:grid-cols-2">
+        {completeProjects.map((group) => {
+          const editableChart = group.find((chart) => chart.sectionRole === "chart") ?? group[0];
+          return (
+            <ChartProjectCard
+              key={group[0].projectId}
+              charts={group}
+              onOpen={() => router.push(`/chart/${group[0].id}`)}
+              onEdit={() => router.push(`/chart-editor?load=${editableChart.id}`)}
+              onDelete={() => group.forEach((chart) => onDelete(chart.id))}
+            />
+          );
+        })}
+        {completeLoose.map((chart) => (
+          <ChartCard key={chart.id} chart={chart}
+            onEdit={() => router.push(`/chart-editor?load=${chart.id}`)}
+            onDelete={() => onDelete(chart.id)} />
+        ))}
+      </LibrarySection>
     </div>
   );
 }
@@ -374,6 +414,79 @@ function ChartCard({ chart, onEdit, onDelete }: { chart: SavedChart; onEdit: () 
       </div>
     </div>
   );
+}
+
+function LibrarySection({
+  title,
+  count,
+  columns = "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3",
+  children,
+}: {
+  title: string;
+  count: number;
+  columns?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section>
+      <div className="mb-3 flex items-center gap-2">
+        <h2 className="text-lg font-bold text-[#2e1f14]" style={{ fontFamily: "var(--font-playfair), serif" }}>
+          {title}
+        </h2>
+        <span className="rounded-full bg-[#ecdccb] px-2 py-0.5 text-[10px] font-bold text-[#8b6347]">
+          {count}
+        </span>
+      </div>
+      {count > 0 ? (
+        <div className={`grid ${columns} gap-5`}>
+          {children}
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-dashed border-[#d9c8b4] bg-white/45 px-4 py-6 text-sm text-[#8b6347]">
+          Nothing here yet.
+        </div>
+      )}
+    </section>
+  );
+}
+
+function patternProgress(pattern: Pattern, charts: SavedChart[]): { percent: number; total: number; done: number } {
+  const linkedCharts = linkedChartsForPattern(pattern, charts);
+  if (linkedCharts.length) return chartGroupProgress(linkedCharts);
+
+  const total = pattern.sections.reduce((acc, section) => acc + section.instructions.length, 0);
+  const done = Object.values(pattern.completedRows).reduce(
+    (acc, sectionRows) => acc + Object.values(sectionRows).filter(Boolean).length,
+    0
+  );
+  return { total, done, percent: total > 0 ? Math.round((done / total) * 100) : 0 };
+}
+
+function linkedChartsForPattern(pattern: Pattern, charts: SavedChart[]): SavedChart[] {
+  if (pattern.projectId) {
+    const byProject = charts.filter((chart) => chart.projectId === pattern.projectId);
+    if (byProject.length) return byProject;
+  }
+  const bySource = charts.filter((chart) => chart.sourcePatternId === pattern.id);
+  if (bySource.length) return bySource;
+  if (pattern.firstChartId) {
+    const first = charts.find((chart) => chart.id === pattern.firstChartId);
+    if (first?.projectId) return charts.filter((chart) => chart.projectId === first.projectId);
+    if (first) return [first];
+  }
+  return [];
+}
+
+function chartProgress(chart: SavedChart): { percent: number; total: number; done: number } {
+  const done = countCompletedActive(chart);
+  const total = countActive(chart);
+  return { total, done, percent: total > 0 ? Math.round((done / total) * 100) : 0 };
+}
+
+function chartGroupProgress(charts: SavedChart[]): { percent: number; total: number; done: number } {
+  const total = charts.reduce((sum, chart) => sum + countActive(chart), 0);
+  const done = charts.reduce((sum, chart) => sum + countCompletedActive(chart), 0);
+  return { total, done, percent: total > 0 ? Math.round((done / total) * 100) : 0 };
 }
 
 function countActive(chart: SavedChart): number {

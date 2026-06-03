@@ -8,51 +8,29 @@ import { GARMENT_TYPES, AVAILABLE_SIZES } from "@/types";
 import type { Pattern } from "@/types";
 import { GARMENT_OPTIONS, getStitchGraph } from "@/lib/craftKnowledge";
 import { createProjectChartsFromPattern } from "@/lib/chartFactory";
-import { inferChartPalette, designTextFromParts } from "@/lib/designIntent";
-import { imagePreviewToChart, type ImportedChart } from "@/lib/imageChart";
+import { extractNamedColours, hasMonet, hasStarryNight, inferChartPalette, designTextFromParts } from "@/lib/designIntent";
+import { imagePreviewToChart, photoPreviewToGarmentDesignChart, type ImportedChart } from "@/lib/imageChart";
+import { stitchDisplayImage } from "@/lib/stitchImages";
 import { Check, Sparkles, Upload, PenLine, Camera, Plus, Trash2, Grid2X2 } from "lucide-react";
+import { GarmentIcon } from "@/components/GarmentIcon";
 
-function GarmentIcon({ type, className = "w-10 h-10" }: { type: string; className?: string }) {
-  const c = "currentColor";
-  const sw = "1.8";
-  const fill = "currentColor";
-  const fo = "0.13";
-  switch (type) {
-    case "Sweater": case "Pullover":
-      return <svg viewBox="0 0 80 72" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}><path d="M28 10 Q30 22 40 22 Q50 22 52 10 L65 15 L74 42 L60 42 L60 68 L20 68 L20 42 L6 42 L15 15 Z" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/><path d="M28 10 Q30 22 40 22 Q50 22 52 10" stroke={c} strokeWidth={sw} fill="none" strokeLinecap="round"/></svg>;
-    case "Cardigan":
-      return <svg viewBox="0 0 80 72" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}><path d="M28 10 L15 15 L6 42 L20 42 L20 68 L39 68 L39 22" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/><path d="M52 10 L65 15 L74 42 L60 42 L60 68 L41 68 L41 22" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/><path d="M28 10 Q30 22 40 22 Q50 22 52 10" stroke={c} strokeWidth={sw} fill="none"/><line x1="40" y1="22" x2="40" y2="68" stroke={c} strokeWidth="1.5" strokeDasharray="3 2"/></svg>;
-    case "Hat / Beanie":
-      return <svg viewBox="0 0 80 72" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}><path d="M18 54 C18 32 62 32 62 54 Z" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/><rect x="14" y="52" width="52" height="10" rx="5" fill={fill} fillOpacity="0.2" stroke={c} strokeWidth={sw}/><path d="M24 54 L24 62 M32 54 L32 62 M40 54 L40 62 M48 54 L48 62 M56 54 L56 62" stroke={c} strokeWidth="1.2" strokeLinecap="round"/></svg>;
-    case "Scarf":
-      return <svg viewBox="0 0 80 72" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}><rect x="28" y="6" width="24" height="60" rx="12" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw}/><line x1="28" y1="20" x2="52" y2="20" stroke={c} strokeWidth="1.2" strokeDasharray="3 2"/><line x1="28" y1="32" x2="52" y2="32" stroke={c} strokeWidth="1.2" strokeDasharray="3 2"/><line x1="28" y1="44" x2="52" y2="44" stroke={c} strokeWidth="1.2" strokeDasharray="3 2"/><line x1="28" y1="56" x2="52" y2="56" stroke={c} strokeWidth="1.2" strokeDasharray="3 2"/></svg>;
-    case "Cowl":
-      return <svg viewBox="0 0 80 72" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}><ellipse cx="40" cy="36" rx="28" ry="22" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw}/><ellipse cx="40" cy="36" rx="16" ry="12" fill="white" stroke={c} strokeWidth={sw}/></svg>;
-    case "Mittens":
-      return <svg viewBox="0 0 80 72" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}><path d="M20 60 L20 28 Q20 14 30 14 Q40 14 40 28 L40 60 Z" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/><path d="M40 34 Q44 26 50 28 Q56 30 50 38 L40 42" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/><line x1="52" y1="14" x2="60" y2="14" stroke="none"/><path d="M46 60 L46 28 Q46 14 56 14 Q66 14 66 28 L66 60 Z" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/></svg>;
-    case "Gloves":
-      return <svg viewBox="0 0 80 72" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}><path d="M22 64 L22 36 Q22 26 28 26 Q30 26 31 30 L31 14 Q31 10 34 10 Q37 10 37 14 L37 24 Q38 20 41 20 Q44 20 44 24 L44 26 Q45 22 48 22 Q51 22 51 26 L51 36 Q56 30 58 32 Q62 38 56 44 L51 52 L51 64 Z" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/></svg>;
-    case "Socks":
-      return <svg viewBox="0 0 80 72" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}><path d="M30 8 L30 44 Q30 60 50 60 Q66 60 66 46 Q66 38 54 38 L50 38 L50 8 Z" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/><line x1="30" y1="18" x2="50" y2="18" stroke={c} strokeWidth="1.2" strokeDasharray="3 2"/></svg>;
-    case "Shawl":
-      return <svg viewBox="0 0 80 72" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}><path d="M40 12 L8 62 L72 62 Z" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/><line x1="40" y1="12" x2="40" y2="62" stroke={c} strokeWidth="1.2" strokeDasharray="3 2"/><path d="M22 44 Q40 52 58 44" fill="none" stroke={c} strokeWidth="1.2"/></svg>;
-    case "Vest":
-      return <svg viewBox="0 0 80 72" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}><path d="M26 10 Q28 20 40 20 Q52 20 54 10 L64 20 L60 68 L20 68 L16 20 Z" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/><path d="M26 10 Q28 20 40 20 Q52 20 54 10" stroke={c} strokeWidth={sw} fill="none"/></svg>;
-    case "Tank Top":
-      return <svg viewBox="0 0 80 72" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}><path d="M28 8 L20 20 L26 20 L26 68 L54 68 L54 20 L60 20 L52 8 Q50 18 40 18 Q30 18 28 8 Z" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeLinejoin="round"/></svg>;
-    case "Tote Bag":
-      return <svg viewBox="0 0 80 72" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}><rect x="14" y="24" width="52" height="44" rx="4" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw}/><path d="M28 24 Q28 10 40 10 Q52 10 52 24" fill="none" stroke={c} strokeWidth={sw} strokeLinecap="round"/></svg>;
-    case "Dishcloth":
-      return <svg viewBox="0 0 80 72" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}><rect x="10" y="10" width="60" height="52" rx="4" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw}/><line x1="10" y1="23" x2="70" y2="23" stroke={c} strokeWidth="1.2" strokeDasharray="3 2"/><line x1="10" y1="36" x2="70" y2="36" stroke={c} strokeWidth="1.2" strokeDasharray="3 2"/><line x1="10" y1="49" x2="70" y2="49" stroke={c} strokeWidth="1.2" strokeDasharray="3 2"/></svg>;
-    case "Baby Blanket": case "Throw Blanket":
-      return <svg viewBox="0 0 80 72" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}><rect x="8" y="8" width="64" height="56" rx="6" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw}/><path d="M8 20 L72 20 M8 32 L72 32 M8 44 L72 44 M8 56 L72 56" stroke={c} strokeWidth="1" strokeDasharray="4 3"/><path d="M20 8 L20 64 M32 8 L32 64 M44 8 L44 64 M56 8 L56 64" stroke={c} strokeWidth="1" strokeDasharray="4 3"/></svg>;
-    case "Headband":
-      return <svg viewBox="0 0 80 72" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}><path d="M14 28 Q14 12 40 12 Q66 12 66 28 L66 44 Q66 60 40 60 Q14 60 14 44 Z" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw}/><path d="M14 28 Q14 44 40 44 Q66 44 66 28" fill="white" stroke={c} strokeWidth={sw}/></svg>;
-    case "Leg Warmers":
-      return <svg viewBox="0 0 80 72" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}><rect x="12" y="8" width="24" height="56" rx="12" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw}/><rect x="44" y="8" width="24" height="56" rx="12" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw}/><line x1="12" y1="20" x2="36" y2="20" stroke={c} strokeWidth="1.2" strokeDasharray="3 2"/><line x1="44" y1="20" x2="68" y2="20" stroke={c} strokeWidth="1.2" strokeDasharray="3 2"/></svg>;
-    default:
-      return <svg viewBox="0 0 80 72" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}><rect x="14" y="14" width="52" height="44" rx="8" fill={fill} fillOpacity={fo} stroke={c} strokeWidth={sw} strokeDasharray="5 3"/><text x="40" y="42" textAnchor="middle" fontSize="22" fill={c} fontFamily="serif">?</text></svg>;
-  }
+type StartingPoint = NonNullable<WizardConfig["startingPoint"]>;
+type UploadStartingPoint = Extract<StartingPoint, "photo-inspiration" | "photo-chart" | "import-chart">;
+
+function isUploadStartingPoint(value: WizardConfig["startingPoint"]): value is UploadStartingPoint {
+  return value === "photo-inspiration" || value === "photo-chart" || value === "import-chart";
+}
+
+function isExactChartStartingPoint(value: WizardConfig["startingPoint"]): value is Extract<UploadStartingPoint, "photo-chart" | "import-chart"> {
+  return value === "photo-chart" || value === "import-chart";
+}
+
+function startingPointLabel(value: WizardConfig["startingPoint"]): string {
+  if (value === "photo-inspiration") return "Photo as inspiration";
+  if (value === "photo-chart") return "Photo as exact chart";
+  if (value === "import-chart") return "Imported chart";
+  if (value === "text") return "Describe it";
+  return "Not selected";
 }
 
 const DIFFICULTIES: { value: Difficulty; label: string; desc: string }[] = [
@@ -82,6 +60,7 @@ const initialConfig: WizardConfig = {
   styleOption: "crew-neck pullover",
   stitchPreference: "knit",
   selectedColors: [...DEFAULT_PALETTE],
+  colorLimit: 8,
 };
 
 function designTextForConfig(config: WizardConfig): string {
@@ -94,13 +73,36 @@ function designTextForConfig(config: WizardConfig): string {
   ]);
 }
 
+function paletteWasCustomized(colors: string[]): boolean {
+  if (colors.length !== DEFAULT_PALETTE.length) return true;
+  return colors.some((color, index) => color.toLowerCase() !== DEFAULT_PALETTE[index].toLowerCase());
+}
+
+function mergePalettes(primary: string[], secondary: string[]): string[] {
+  return [...primary, ...secondary]
+    .filter(Boolean)
+    .filter((color, index, all) => all.findIndex((item) => item.toLowerCase() === color.toLowerCase()) === index)
+    .slice(0, 10);
+}
+
+function inferredPaletteIfSpecific(text: string): string[] {
+  const lower = text.toLowerCase();
+  const hasSpecificPalette = extractNamedColours(text).length > 0 || hasMonet(lower) || hasStarryNight(lower);
+  return hasSpecificPalette ? inferChartPalette(text) : [];
+}
+
 function imageReferenceDescription(config: WizardConfig): string {
   return designTextFromParts([
     config.textDescription,
     `uploaded ${config.garmentType.toLowerCase()} garment reference photo`,
-    "use the photo as inspiration for garment layout, colour-blocking, motif placement, ribbing, collar, cuffs, hem, and text or graphic placement",
-    "do not convert the whole photo or background into an intarsia chart",
+    "extract the charted design shown on the garment: colour blocking, motifs, construction details, edge finishes, and placement",
+    "ignore the room, floor, shadows, and photo background",
   ]);
+}
+
+function dataUrlToBase64(value: string | null): string | undefined {
+  if (!value?.startsWith("data:")) return undefined;
+  return value.split(",", 2)[1] || undefined;
 }
 
 export default function GeneratePage() {
@@ -115,7 +117,7 @@ export default function GeneratePage() {
   const handleImageUpload = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const uploadMode = config.startingPoint === "chart" ? "chart" : "image";
+    const uploadMode = isUploadStartingPoint(config.startingPoint) ? config.startingPoint : "photo-inspiration";
     const reader = new FileReader();
     reader.onload = () => {
       const preview = reader.result as string;
@@ -125,12 +127,19 @@ export default function GeneratePage() {
         imagePreview: preview,
         startingPoint: uploadMode,
       }));
-      imagePreviewToChart(preview, {
-        maxWidth: 36,
-        maxHeight: 48,
-        maxColors: 8,
-        crop: uploadMode === "chart" ? "none" : "garment",
-      })
+      const chartPromise = isExactChartStartingPoint(uploadMode)
+        ? imagePreviewToChart(preview, {
+            maxWidth: 36,
+            maxHeight: 48,
+            maxColors: config.colorLimit,
+            crop: "none",
+          })
+        : photoPreviewToGarmentDesignChart(preview, {
+            maxWidth: 42,
+            maxHeight: 56,
+            maxColors: config.colorLimit,
+          });
+      chartPromise
         .then((chart) => {
           setConfig((c) => c.imagePreview === preview ? { ...c, selectedColors: chart.colors } : c);
         })
@@ -139,7 +148,7 @@ export default function GeneratePage() {
         });
     };
     reader.readAsDataURL(file);
-  }, [config.startingPoint]);
+  }, [config.startingPoint, config.colorLimit]);
 
   const handleGenerate = useCallback(async () => {
     setLoading(true);
@@ -147,28 +156,38 @@ export default function GeneratePage() {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 35000);
     try {
-      let imageBase64: string | undefined;
       let importedChart: ImportedChart | undefined;
-      if (config.imagePreview && config.startingPoint === "chart") {
+      let inspirationChart: ImportedChart | undefined;
+      if (config.imagePreview && isExactChartStartingPoint(config.startingPoint)) {
         const chartFromImage = await imagePreviewToChart(config.imagePreview, {
-          maxWidth: config.startingPoint === "chart" ? 90 : 72,
-          maxHeight: config.startingPoint === "chart" ? 120 : 96,
+          maxWidth: 90,
+          maxHeight: 120,
           maxColors: Math.max(1, config.selectedColors.length || 8),
           crop: "none",
         });
         importedChart = {
           ...chartFromImage,
-          colors: config.selectedColors.length ? config.selectedColors : chartFromImage.colors,
+          colors: paletteWasCustomized(config.selectedColors) ? config.selectedColors : chartFromImage.colors,
         };
       }
-      if (config.startingPoint === "image" && config.imageFile && config.imagePreview) {
-        imageBase64 = config.imagePreview.split(",")[1];
+      if (config.imagePreview && config.startingPoint === "photo-inspiration") {
+        const chartFromPhoto = await photoPreviewToGarmentDesignChart(config.imagePreview, {
+          maxWidth: 110,
+          maxHeight: 132,
+          maxColors: Math.max(2, config.selectedColors.length || config.colorLimit),
+        });
+        inspirationChart = {
+          ...chartFromPhoto,
+          colors: paletteWasCustomized(config.selectedColors) ? config.selectedColors : chartFromPhoto.colors,
+        };
       }
 
       const textDescription =
-        config.startingPoint === "image"
+        config.startingPoint === "photo-inspiration"
           ? imageReferenceDescription(config)
-          : config.textDescription || (config.startingPoint === "chart" ? `Imported chart for ${config.garmentType}` : undefined);
+          : config.textDescription || (isExactChartStartingPoint(config.startingPoint) ? `Imported stitch chart for ${config.garmentType}` : undefined);
+      const imageBase64 =
+        config.startingPoint === "photo-inspiration" ? dataUrlToBase64(config.imagePreview) : undefined;
 
       const res = await fetch("/api/generate-pattern", {
         method: "POST",
@@ -179,9 +198,13 @@ export default function GeneratePage() {
           garmentType: config.garmentType,
           sizes: config.sizes,
           difficulty: config.difficulty,
+          includeRibbing: config.includeRibbing,
           extraNotes: [
-            config.startingPoint === "image"
-              ? "Treat the uploaded image as a garment reference, not as a full-picture chart. Extract the garment silhouette, colour-blocking, ribbing, and motif placement."
+            config.startingPoint === "photo-inspiration"
+              ? "The chart is extracted locally from the garment photo. Pattern text should support the visible garment design and not invent unrelated motifs."
+              : "",
+            isExactChartStartingPoint(config.startingPoint)
+              ? "The user imported an existing chart image. Pattern text should support that chart and not invent a different motif."
               : "",
             config.extraNotes,
             config.styleOption ? `Style option: ${config.styleOption}.` : "",
@@ -190,8 +213,8 @@ export default function GeneratePage() {
               ? "Include ribbing where structurally useful, such as hems, cuffs, collars, button bands, and pocket tops."
               : "Skip decorative ribbing unless the construction truly requires it.",
           ].filter(Boolean).join(" "),
-          imageBase64,
           textDescription,
+          imageBase64,
         }),
       });
 
@@ -199,21 +222,37 @@ export default function GeneratePage() {
       if (!res.ok || data.error) throw new Error(data.error ?? "Generation failed");
 
       const pattern = data.pattern as Pattern;
+      const generatedPatternContext = [
+        pattern.notes,
+        ...(pattern.sections ?? []).flatMap((section) => [
+          section.name,
+          section.description,
+          ...(section.instructions ?? []).slice(0, 4).map((instruction) => instruction.text),
+        ]),
+      ].filter(Boolean);
       pattern.sourceDescription = [
         pattern.sourceDescription,
-        config.startingPoint === "image" ? imageReferenceDescription(config) : "",
+        config.startingPoint === "photo-inspiration" ? imageReferenceDescription(config) : "",
+        isExactChartStartingPoint(config.startingPoint) ? "imported stitch chart" : "",
         config.textDescription,
         config.styleOption,
         config.stitchPreference,
         config.extraNotes,
+        ...generatedPatternContext,
       ].filter(Boolean).join(" ");
+      const outputColors = importedChart?.colors ?? (
+        config.startingPoint === "photo-inspiration"
+          ? mergePalettes(inferredPaletteIfSpecific(pattern.sourceDescription), inspirationChart?.colors ?? config.selectedColors)
+          : inspirationChart?.colors ?? config.selectedColors
+      );
       if (config.imagePreview) {
         pattern.sourceImagePreview = config.imagePreview;
       }
       const generatedCharts = createProjectChartsFromPattern(pattern, {
         includeRibbing: config.includeRibbing,
-        colors: config.selectedColors,
+        colors: outputColors,
         importedChart,
+        inspirationChart,
       });
       pattern.projectId = generatedCharts[0]?.projectId;
       const firstActualChart = generatedCharts.find((c) => c.sectionRole === "chart");
@@ -235,7 +274,7 @@ export default function GeneratePage() {
   }, [config, savePattern, saveChart, router]);
 
   const canProceedStep1 =
-    config.startingPoint === "image" || config.startingPoint === "chart"
+    isUploadStartingPoint(config.startingPoint)
       ? !!config.imageFile
       : config.textDescription.trim().length > 10;
 
@@ -393,36 +432,43 @@ function Step1({
         What&rsquo;s your starting point?
       </h2>
       <p className="text-sm text-[#8b6f47] mb-6">
-        Upload a photo, import an existing chart, or tell us in your own words.
+        Pick the source first so the chart maker knows whether to extract, convert, import, or draw from words.
       </p>
 
       {/* Option cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        <OptionCard
-          selected={config.startingPoint === "image"}
-          onClick={() => setConfig((c) => ({ ...c, startingPoint: "image" }))}
-          icon={<Camera size={22} />}
-          title="Garment photo"
-          desc="Use a sweater/photo as construction inspiration"
-        />
-        <OptionCard
-          selected={config.startingPoint === "chart"}
-          onClick={() => setConfig((c) => ({ ...c, startingPoint: "chart" }))}
-          icon={<Grid2X2 size={22} />}
-          title="Import chart"
-          desc="Upload your own chart and track it"
-        />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
         <OptionCard
           selected={config.startingPoint === "text"}
           onClick={() => setConfig((c) => ({ ...c, startingPoint: "text", imageFile: null, imagePreview: null }))}
           icon={<PenLine size={22} />}
           title="Describe it"
-          desc="Tell us what you want in plain language"
+          desc="Create a chart from the motif, colours, and garment you write"
+        />
+        <OptionCard
+          selected={config.startingPoint === "photo-inspiration"}
+          onClick={() => setConfig((c) => ({ ...c, startingPoint: "photo-inspiration" }))}
+          icon={<Camera size={22} />}
+          title="Photo as inspiration"
+          desc="Read the garment in the photo and chart the design shown on it"
+        />
+        <OptionCard
+          selected={config.startingPoint === "photo-chart"}
+          onClick={() => setConfig((c) => ({ ...c, startingPoint: "photo-chart" }))}
+          icon={<Grid2X2 size={22} />}
+          title="Photo as exact chart"
+          desc="Convert the whole image into stitch cells with a colour limit"
+        />
+        <OptionCard
+          selected={config.startingPoint === "import-chart"}
+          onClick={() => setConfig((c) => ({ ...c, startingPoint: "import-chart" }))}
+          icon={<Upload size={22} />}
+          title="Import chart"
+          desc="Bring in an existing chart or grid image and keep that design"
         />
       </div>
 
       {/* Image upload */}
-      {(config.startingPoint === "image" || config.startingPoint === "chart") && (
+      {isUploadStartingPoint(config.startingPoint) && (
         <div className="mt-2">
           <input
             ref={fileInputRef}
@@ -436,7 +482,7 @@ function Step1({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={config.imagePreview}
-                alt={config.startingPoint === "chart" ? "Imported chart" : "Uploaded inspiration"}
+                alt={isExactChartStartingPoint(config.startingPoint) ? "Imported chart" : "Uploaded garment inspiration"}
                 className="w-full max-h-56 object-cover rounded-xl border border-[#e8ddd0]"
               />
               <button
@@ -456,15 +502,21 @@ function Step1({
             >
               <div className="flex justify-center mb-2 text-[#c4a882]"><Upload size={28} /></div>
               <p className="text-[#8b6f47] font-medium text-sm">
-                {config.startingPoint === "chart" ? "Click to import a chart image" : "Click to upload a photo"}
+                {config.startingPoint === "photo-inspiration"
+                  ? "Click to upload a garment photo"
+                  : config.startingPoint === "photo-chart"
+                    ? "Click to upload a photo to convert"
+                    : "Click to import a chart image"}
               </p>
               <p className="text-[#c4a882] text-xs mt-1">JPG, PNG, WEBP up to 10MB</p>
             </button>
           )}
           <p className="mt-2 text-xs text-[#8b6f47]">
-            {config.startingPoint === "chart"
-              ? "The uploaded chart is converted locally into stitches, colours, shopping list, and tracker steps."
-              : "The uploaded image is converted locally into chart stitches, then fitted onto the garment sections."}
+            {config.startingPoint === "photo-inspiration"
+              ? "This extracts the garment design from the photo and ignores the background."
+              : config.startingPoint === "photo-chart"
+                ? "This converts the whole photo into a stitch chart with a selectable colour count."
+                : "This keeps the imported chart design and uses it as the project chart."}
           </p>
         </div>
       )}
@@ -539,15 +591,13 @@ function Step2({
             <button
               key={g}
               onClick={() => setConfig((c) => ({ ...c, garmentType: g, styleOption: GARMENT_OPTIONS[g]?.[0] ?? "" }))}
-              className={`flex flex-col items-center gap-1.5 py-3 px-1 rounded-xl border-2 text-center transition-all ${
+              className={`flex flex-col items-center gap-2 py-3 px-1 rounded-xl border-2 text-center transition-all ${
                 config.garmentType === g
                   ? "border-[#8b6f47] bg-[#f0e8da]"
                   : "border-[#e8ddd0] hover:border-[#c4a882] hover:bg-[#faf7f2]"
               }`}
             >
-              <div className={`${config.garmentType === g ? "text-[#8b6f47]" : "text-[#c4a882]"}`}>
-                <GarmentIcon type={g} className="w-9 h-9" />
-              </div>
+              <GarmentIcon type={g} active={config.garmentType === g} className="h-12 w-14" />
               <span className="text-[10px] font-semibold text-[#3d2b1f] leading-tight">{g}</span>
             </button>
           ))}
@@ -670,7 +720,7 @@ function Step3({
               }`}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={stitch.imageUrl} alt={stitch.name} className="h-24 w-full object-contain bg-[#fffaf0] p-2" />
+              <img src={stitchDisplayImage(stitch)} alt={stitch.name} className="h-24 w-full object-cover bg-[#fffaf0]" />
               <span className="block px-3 py-2">
                 <span className="block text-xs font-bold text-[#3d2b1f]">{stitch.name}</span>
                 <span className="block text-[10px] leading-snug text-[#8b6f47]">{stitch.appearance}</span>
@@ -722,12 +772,12 @@ function Step4({
         <textarea
           value={config.extraNotes}
           onChange={(e) => setConfig((c) => ({ ...c, extraNotes: e.target.value }))}
-          placeholder="e.g. large red heart on the back, blue checker sleeves, flower pockets, shawl collar, no ribbing on the hem..."
+          placeholder="e.g. cream body with navy lettering across the front, flower pockets, shawl collar, no ribbing on the hem..."
           rows={6}
           className="w-full border border-[#e8ddd0] rounded-xl px-4 py-3 text-sm text-[#3d2b1f] placeholder:text-[#c4a882] focus:outline-none focus:border-[#8b6f47] resize-none bg-[#faf7f2]"
         />
         <p className="text-xs text-[#8b6f47] mt-2">
-          Words like stripes, flowers, hearts, stars, checker, waves, red, blue, green, cream, pockets, collar, and buttons now affect the generated chart.
+          Words like stripes, flowers, stars, checker, waves, red, blue, green, cream, pockets, collar, lettering, and buttons affect the generated chart.
         </p>
       </div>
     </div>
@@ -741,6 +791,8 @@ function Step5Colors({
   config: WizardConfig;
   setConfig: React.Dispatch<React.SetStateAction<WizardConfig>>;
 }) {
+  const [rebuildingPalette, setRebuildingPalette] = useState(false);
+
   const updateColor = (idx: number, value: string) => {
     setConfig((c) => {
       const next = [...c.selectedColors];
@@ -758,6 +810,34 @@ function Step5Colors({
       if (c.selectedColors.length <= 1) return c;
       return { ...c, selectedColors: c.selectedColors.filter((_, index) => index !== idx) };
     });
+  };
+
+  const rebuildFromImage = async (limit: number) => {
+    if (!config.imagePreview || !isUploadStartingPoint(config.startingPoint)) {
+      setConfig((c) => ({ ...c, colorLimit: limit }));
+      return;
+    }
+
+    setRebuildingPalette(true);
+    try {
+      const chart = isExactChartStartingPoint(config.startingPoint)
+        ? await imagePreviewToChart(config.imagePreview, {
+            maxWidth: 42,
+            maxHeight: 56,
+            maxColors: limit,
+            crop: "none",
+          })
+        : await photoPreviewToGarmentDesignChart(config.imagePreview, {
+            maxWidth: 42,
+            maxHeight: 56,
+            maxColors: limit,
+          });
+      setConfig((c) => ({ ...c, colorLimit: limit, selectedColors: chart.colors }));
+    } catch {
+      setConfig((c) => ({ ...c, colorLimit: limit }));
+    } finally {
+      setRebuildingPalette(false);
+    }
   };
 
   const colorLabels = [
@@ -786,6 +866,31 @@ function Step5Colors({
           These were suggested from your description. Colour 1 is the background; the rest are used for the chart motifs. Change, add, or delete colours before generating.
         </p>
       </div>
+
+      {isUploadStartingPoint(config.startingPoint) && config.imagePreview && (
+        <div className="rounded-xl border-2 border-[#251a1c] bg-[#fffaf0] p-4">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <div className="text-sm font-black text-[#251a1c]">Image colour count</div>
+              <div className="text-xs text-[#8b6f47]">
+                {isExactChartStartingPoint(config.startingPoint)
+                  ? "Controls how many colours the exact chart conversion keeps."
+                  : "Controls how many colours the garment-photo extraction keeps."}
+              </div>
+            </div>
+            <span className="text-sm font-black text-[#251a1c]">{config.colorLimit}</span>
+          </div>
+          <input
+            type="range"
+            min={2}
+            max={10}
+            value={config.colorLimit}
+            onChange={(e) => void rebuildFromImage(Number(e.target.value))}
+            className="w-full accent-[#2c7be5]"
+          />
+          {rebuildingPalette && <p className="mt-2 text-xs font-semibold text-[#8b6f47]">Rebuilding palette...</p>}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         {config.selectedColors.map((color, idx) => (
@@ -862,11 +967,9 @@ function Step6Generate({
         <SummaryRow
           label="Starting point"
           value={
-            config.startingPoint === "image"
-              ? "Uploaded image"
-              : config.startingPoint === "chart"
-                ? "Imported chart"
-                : `"${config.textDescription.slice(0, 60)}${config.textDescription.length > 60 ? "..." : ""}"`
+            config.startingPoint === "text"
+              ? `"${config.textDescription.slice(0, 60)}${config.textDescription.length > 60 ? "..." : ""}"`
+              : startingPointLabel(config.startingPoint)
           }
         />
         <SummaryRow label="Craft" value={config.craftType === "knitting" ? "Knitting" : "Crocheting"} />
@@ -877,6 +980,9 @@ function Step6Generate({
         <SummaryRow label="Ribbing" value={config.includeRibbing ? "Add where useful" : "Skip unless required"} />
         {config.stitchPreference && <SummaryRow label="Main stitch" value={config.stitchPreference} />}
         {config.extraNotes && <SummaryRow label="Notes" value={config.extraNotes} />}
+        {isUploadStartingPoint(config.startingPoint) && (
+          <SummaryRow label="Colour count" value={`${config.colorLimit}`} />
+        )}
         <div className="flex items-start gap-3">
           <span className="text-xs text-[#c4a882] font-semibold w-24 shrink-0 pt-1 uppercase tracking-wide">Colours</span>
           <div className="flex gap-1.5 flex-wrap">

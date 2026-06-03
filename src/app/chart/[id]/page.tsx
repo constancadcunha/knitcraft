@@ -4,10 +4,18 @@ import { use, useRef, useEffect, useCallback, useState } from "react";
 import Link from "next/link";
 import { useStore } from "@/lib/store";
 import { isActiveChartCell } from "@/lib/shapes";
-import { ArrowLeft, PenLine, RotateCcw, CheckCheck, ChevronDown, ChevronRight, Check, BookOpen } from "lucide-react";
+import type { QuickReferenceItem, SavedChart } from "@/types";
+import { ArrowLeft, PenLine, RotateCcw, CheckCheck, ChevronDown, ChevronRight, Check, BookOpen, X, ExternalLink } from "lucide-react";
 
 const CELL_SIZE = 22;
 const ROW_CELL_SIZE = 28;
+
+type CompletionModalState = {
+  type: "step" | "project";
+  title: string;
+  message: string;
+  nextChartId?: string;
+};
 
 export default function ChartTrackerPage(props: { params: Promise<{ id: string }> }) {
   const { id } = use(props.params);
@@ -28,9 +36,12 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
   const completedRef = useRef<Record<string, boolean>>({});
   const visitedCellsRef = useRef<Set<string>>(new Set());
   const visitedRowCellsRef = useRef<Set<string>>(new Set());
+  const [completionVersion, setCompletionVersion] = useState(0);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [selectedRow, setSelectedRow] = useState<number | null>(null);
-  const [showCelebration, setShowCelebration] = useState(false);
+  const [completionModal, setCompletionModal] = useState<CompletionModalState | null>(null);
+  const [showGuideDiagrams, setShowGuideDiagrams] = useState(true);
+  const [activeGuideLesson, setActiveGuideLesson] = useState<(QuickReferenceItem & { groupTitle?: string }) | null>(null);
 
   useEffect(() => {
     completedRef.current = chart?.completedCells ?? {};
@@ -102,9 +113,10 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
     }
   }, [chart, isChartActive]);
 
-  const drawRowView = useCallback(() => {
+  const drawRowView = useCallback((rowOverride?: number) => {
     const canvas = rowCanvasRef.current;
-    if (!canvas || !chart || selectedRow === null) return;
+    const row = rowOverride ?? selectedRow;
+    if (!canvas || !chart || row === null) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
@@ -112,7 +124,6 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
     canvas.height = ROW_CELL_SIZE;
 
     const completed = completedRef.current;
-    const row = selectedRow;
 
     for (let col = 0; col < chart.width; col++) {
       const x = col * ROW_CELL_SIZE;
@@ -160,6 +171,11 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
 
   useEffect(() => { drawTracker(); }, [drawTracker]);
   useEffect(() => { drawRowView(); }, [drawRowView]);
+  useEffect(() => {
+    void completionVersion;
+    drawTracker();
+    drawRowView();
+  }, [completionVersion, drawTracker, drawRowView]);
 
   // Scroll the main canvas container so the selected stitch is centred in view.
   useEffect(() => {
@@ -225,26 +241,56 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
   );
 
   const commitCompletedCells = useCallback(
-    (next: Record<string, boolean>) => {
+    (next: Record<string, boolean>, rowOverride?: number) => {
       if (!chart) return;
+      const isCompleteWithCells = (target: SavedChart, cells: Record<string, boolean>) => {
+        let total = 0;
+        let done = 0;
+        for (let row = 0; row < target.height; row++) {
+          for (let col = 0; col < target.width; col++) {
+            if (!isActiveChartCell(target.shapeKey, target.rowShaping, row, col, target.width, target.height)) continue;
+            total++;
+            if (cells[`${row},${col}`]) done++;
+          }
+        }
+        return total > 0 && done === total;
+      };
+      const wasSectionDone = isCompleteWithCells(chart, completedRef.current);
       completedRef.current = next;
+      setCompletionVersion((version) => version + 1);
       updateChart(chart.id, { completedCells: next });
-      let total = 0;
-      let done = 0;
-      for (let row = 0; row < chart.height; row++) {
-        for (let col = 0; col < chart.width; col++) {
-          if (!isActiveChartCell(chart.shapeKey, chart.rowShaping, row, col, chart.width, chart.height)) continue;
-          total++;
-          if (next[`${row},${col}`]) done++;
+      const updatedChart = { ...chart, completedCells: next };
+      const projectScope = chart.projectId
+        ? charts
+            .filter((candidate) => candidate.projectId === chart.projectId)
+            .map((candidate) => candidate.id === chart.id ? updatedChart : candidate)
+            .sort((a, b) => (a.sectionIndex ?? 999) - (b.sectionIndex ?? 999))
+        : [updatedChart];
+      const sectionDone = isCompleteWithCells(updatedChart, next);
+      if (!wasSectionDone && sectionDone) {
+        const allProjectDone = projectScope.every((candidate) => isCompleteWithCells(candidate, candidate.completedCells ?? {}));
+        if (allProjectDone) {
+          setCompletionModal({
+            type: "project",
+            title: "Project complete!",
+            message: "Every step and chart section is complete. Block, seam, weave in ends, and save the finished project in your library.",
+          });
+        } else {
+          const nextChart = projectScope.find((candidate) => !isCompleteWithCells(candidate, candidate.completedCells ?? {}));
+          setCompletionModal({
+            type: "step",
+            title: "Step complete",
+            message: "This section is complete. You can stay here to review it or move to the next unfinished project step.",
+            nextChartId: nextChart?.id,
+          });
         }
       }
-      if (total > 0 && done === total) setShowCelebration(true);
       requestAnimationFrame(() => {
         drawTracker();
-        drawRowView();
+        drawRowView(rowOverride);
       });
     },
-    [chart, updateChart, drawTracker, drawRowView]
+    [chart, charts, updateChart, drawTracker, drawRowView]
   );
 
   const setCellDone = useCallback(
@@ -258,7 +304,7 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
       } else {
         delete next[key];
       }
-      commitCompletedCells(next);
+      commitCompletedCells(next, row);
     },
     [chart, commitCompletedCells, isChartActive]
   );
@@ -285,8 +331,9 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
       setSelectedRow(pos.row);
       setSelectedCell(pos);
       setCellDone(pos.row, pos.col, paintModeRef.current);
+      requestAnimationFrame(() => drawRowView(pos.row));
     },
-    [getCellAt, chart, setCellDone]
+    [getCellAt, chart, setCellDone, drawRowView]
   );
 
   const handlePointerMove = useCallback(
@@ -295,6 +342,7 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
       if ("touches" in e) (e as React.TouchEvent).preventDefault();
       const pos = getCellAt(e);
       if (pos) {
+        setSelectedRow(pos.row);
         setSelectedCell(pos);
         applyCell(pos.row, pos.col);
       }
@@ -386,12 +434,13 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
           next[key] = true;
         }
       }
-      commitCompletedCells(next);
+      commitCompletedCells(next, rowIdx);
       setSelectedRow(rowIdx);
       setSelectedCell({ row: rowIdx, col: activeCols[Math.floor(activeCols.length / 2)] ?? 0 });
       setExpandedRow(rowIdx);
+      requestAnimationFrame(() => drawRowView(rowIdx));
     },
-    [chart, commitCompletedCells, isChartActive]
+    [chart, commitCompletedCells, isChartActive, drawRowView]
   );
 
   if (!chart) {
@@ -417,6 +466,7 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
   const guideItems = guideGroups.flatMap((group) =>
     group.items.map((item) => ({ ...item, groupTitle: group.title }))
   );
+  const hasGuideDiagrams = guideItems.some((item) => item.imageUrl);
 
   // Count only active cells
   let totalActiveCells = 0;
@@ -469,6 +519,13 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
   const selActiveCount = selectedRow !== null ? rowActiveCount(selectedRow) : 0;
   const selDoneCount = selectedRow !== null ? rowDoneCount(selectedRow) : 0;
   const workingRowNumber = (rowIdx: number) => isGuideSection ? rowIdx + 1 : chart.height - rowIdx;
+  const workingSideLabel = (rowIdx: number) => {
+    if (isGuideSection || chart.craftType !== "knitting") return null;
+    const rowNumber = workingRowNumber(rowIdx);
+    return rowNumber % 2 === 1
+      ? "RS row: read right to left, usually knit-facing"
+      : "WS row: read left to right, usually purl-facing";
+  };
   const projectCharts = chart.projectId
     ? charts
         .filter((c) => c.projectId === chart.projectId)
@@ -487,7 +544,11 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
     }
     return total > 0 ? Math.round((done / total) * 100) : 0;
   };
-  const displayColorIndex = (colorIndex: number) => (colorIndex === 6 || colorIndex === 9 ? 0 : colorIndex);
+  const displayColorIndex = (colorIndex: number) => {
+    if (colorIndex === 9 && /button band|button/i.test(chart.sectionName ?? "")) return 0;
+    if (colorIndex === 6 && chart.includeRibbing) return 0;
+    return colorIndex;
+  };
   const usedColorIndexes = Array.from(
     new Set(
       Array.from({ length: chart.height }).flatMap((_, row) =>
@@ -631,6 +692,20 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
                   <BookOpen size={14} /> Quick Learn
                 </Link>
               </div>
+              {hasGuideDiagrams && (
+                <label className="mb-4 flex cursor-pointer items-center justify-between gap-3 rounded-lg border-2 border-[#251a1c] bg-[#fff0bf] px-3 py-2">
+                  <span>
+                    <span className="block text-xs font-black text-[#251a1c]">Show visual references</span>
+                    <span className="block text-[10px] text-[#6b5d52]">Open the visual reference on each matching step.</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={showGuideDiagrams}
+                    onChange={(e) => setShowGuideDiagrams(e.target.checked)}
+                    className="h-5 w-5 shrink-0 accent-[#2c7be5]"
+                  />
+                </label>
+              )}
               <div className="space-y-3">
                 {guideItems.map((item, index) => {
                   const done = !!completed[`${index},0`];
@@ -672,25 +747,24 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
                         </span>
                         </div>
                       </button>
-                      {(item.imageUrl || item.sourceUrl) && (
-                        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                          {item.imageUrl && (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={item.imageUrl}
-                              alt={`${item.title} diagram`}
-                              className="h-24 w-full max-w-[220px] rounded-lg border border-[#e8ddd0] bg-white object-contain p-2"
-                              loading="lazy"
-                            />
-                          )}
-                          <Link
-                            href={item.sourceUrl ?? guideLearnHref(item.title)}
-                            className="inline-flex items-center gap-1.5 self-start rounded-lg border border-[#251a1c] bg-[#fff0bf] px-3 py-2 text-xs font-black text-[#251a1c]"
-                          >
-                            <BookOpen size={13} /> Open matching lesson
-                          </Link>
-                        </div>
-                      )}
+                      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                        {showGuideDiagrams && item.imageUrl && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={item.imageUrl}
+                            alt={`${item.title} tutorial reference`}
+                            className="h-24 w-full max-w-[220px] rounded-lg border border-[#e8ddd0] bg-white object-cover"
+                            loading="lazy"
+                          />
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setActiveGuideLesson(item)}
+                          className="inline-flex items-center gap-1.5 self-start rounded-lg border border-[#251a1c] bg-[#fff0bf] px-3 py-2 text-xs font-black text-[#251a1c]"
+                        >
+                          <BookOpen size={13} /> Open matching lesson
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -754,6 +828,9 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-bold text-[#4a3f35]">
                     Row {workingRowNumber(selectedRow)} - click or drag individual stitches
+                    {workingSideLabel(selectedRow) && (
+                      <span className="ml-2 font-semibold text-[#8b7968]">{workingSideLabel(selectedRow)}</span>
+                    )}
                   </span>
                   <span className="text-xs text-[#8b7968]">
                     {selDoneCount}/{selActiveCount} worked
@@ -847,6 +924,11 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
                         <span className={`text-xs font-bold w-8 shrink-0 ${done ? "text-[#8b7968]/60" : "text-[#8b7968]"}`}>
                           R{workingRowNumber(rowIdx)}
                         </span>
+                        {workingSideLabel(rowIdx) && (
+                          <span className="hidden xl:inline text-[9px] font-semibold text-[#8b7968]/70 w-9 shrink-0">
+                            {workingRowNumber(rowIdx) % 2 === 1 ? "RS" : "WS"}
+                          </span>
+                        )}
                         {/* Mini colour strip */}
                         <div className="flex flex-1 h-3.5 overflow-hidden rounded gap-px">
                           {Array.from({ length: Math.min(chart.width, 24) }, (_, col) => {
@@ -915,36 +997,53 @@ export default function ChartTrackerPage(props: { params: Promise<{ id: string }
           </>
         )}
       </div>
-      {showCelebration && (
+      {completionModal && (
         <div className="fixed inset-0 z-[70] bg-[#251a1c]/45 px-4 flex items-center justify-center">
           <div className="relative max-w-sm w-full bg-[#fffaf0] border-[3px] border-[#251a1c] rounded-lg shadow-[8px_8px_0_#251a1c] p-6 text-center overflow-hidden">
-            <div className="confetti-strip" aria-hidden>
-              {Array.from({ length: 18 }, (_, index) => (
-                <span key={index} style={{ left: `${(index * 17) % 100}%`, animationDelay: `${index * 0.06}s` }} />
-              ))}
-            </div>
+            {completionModal.type === "project" && (
+              <div className="confetti-strip" aria-hidden>
+                {Array.from({ length: 18 }, (_, index) => (
+                  <span key={index} style={{ left: `${(index * 17) % 100}%`, animationDelay: `${index * 0.06}s` }} />
+                ))}
+              </div>
+            )}
             <h2 className="text-2xl font-black text-[#251a1c] mb-2" style={{ fontFamily: "var(--font-lora), serif" }}>
-              Panel complete!
+              {completionModal.title}
             </h2>
             <p className="text-sm text-[#6b5d52] leading-relaxed mb-5">
-              That whole chart is worked. Block it, admire it, and decide what masterpiece gets cast on next.
+              {completionModal.message}
             </p>
             <div className="flex gap-2 justify-center">
               <button
-                onClick={() => setShowCelebration(false)}
+                onClick={() => setCompletionModal(null)}
                 className="px-4 py-2 rounded-lg border-2 border-[#251a1c] bg-[#fffaf0] text-xs font-black text-[#251a1c]"
               >
                 Stay here
               </button>
-              <Link
-                href="/chart-editor"
-                className="px-4 py-2 rounded-lg border-2 border-[#251a1c] bg-[#ffd166] text-xs font-black text-[#251a1c]"
-              >
-                New project
-              </Link>
+              {completionModal.type === "step" && completionModal.nextChartId ? (
+                <Link
+                  href={`/chart/${completionModal.nextChartId}`}
+                  className="px-4 py-2 rounded-lg border-2 border-[#251a1c] bg-[#ffd166] text-xs font-black text-[#251a1c]"
+                >
+                  Next step
+                </Link>
+              ) : (
+                <Link
+                  href="/generate"
+                  className="px-4 py-2 rounded-lg border-2 border-[#251a1c] bg-[#ffd166] text-xs font-black text-[#251a1c]"
+                >
+                  Start another
+                </Link>
+              )}
             </div>
           </div>
         </div>
+      )}
+      {activeGuideLesson && (
+        <GuideLessonModal
+          item={activeGuideLesson}
+          onClose={() => setActiveGuideLesson(null)}
+        />
       )}
     </div>
   );
@@ -960,4 +1059,67 @@ function guideLearnHref(title: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
   return slug ? `/learn#learn-${slug}` : "/learn";
+}
+
+function GuideLessonModal({
+  item,
+  onClose,
+}: {
+  item: QuickReferenceItem & { groupTitle?: string };
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const href = item.sourceUrl ?? guideLearnHref(item.title);
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-[#251a1c]/55 px-4"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="w-full max-w-xl overflow-hidden rounded-lg border-[3px] border-[#251a1c] bg-[#fffaf0] shadow-[8px_8px_0_#251a1c]">
+        <div className="flex items-center justify-between gap-3 border-b-[3px] border-[#251a1c] bg-[#ffd166] px-4 py-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-black uppercase tracking-wide text-[#6b5d52]">
+              {item.groupTitle ?? "Matching lesson"}
+            </p>
+            <h2 className="truncate text-lg font-black text-[#251a1c]">{item.title}</h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border-2 border-[#251a1c] bg-[#fffaf0] p-1.5 text-[#251a1c]"
+            aria-label="Close lesson"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="space-y-4 p-4">
+          {item.imageUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={item.imageUrl}
+              alt={`${item.title} reference`}
+              className="max-h-72 w-full rounded-lg border-2 border-[#251a1c] bg-white object-cover"
+            />
+          )}
+          <p className="text-sm leading-relaxed text-[#4a3a30]">{item.detail}</p>
+          <Link
+            href={href}
+            className="inline-flex items-center gap-2 rounded-lg border-2 border-[#251a1c] bg-[#fff0bf] px-4 py-2 text-xs font-black text-[#251a1c]"
+          >
+            <ExternalLink size={14} /> Open full dictionary entry
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
 }

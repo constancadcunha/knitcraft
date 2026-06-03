@@ -12,6 +12,7 @@ export async function POST(request: Request) {
       extraNotes,
       imageBase64,
       textDescription,
+      includeRibbing,
     }: {
       craftType: CraftType;
       garmentType: string;
@@ -20,6 +21,7 @@ export async function POST(request: Request) {
       extraNotes: string;
       imageBase64?: string;
       textDescription?: string;
+      includeRibbing?: boolean;
     } = body;
 
     if (!craftType || !garmentType || !sizes?.length) {
@@ -37,6 +39,7 @@ export async function POST(request: Request) {
       extraNotes: extraNotes ?? "",
       imageBase64,
       textDescription,
+      includeRibbing: !!includeRibbing,
     });
 
     return Response.json({ pattern });
