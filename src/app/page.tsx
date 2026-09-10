@@ -1,157 +1,174 @@
+import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, BookOpen, FolderOpen, PenLine, Sparkles } from "lucide-react";
 import { GarmentIcon } from "@/components/GarmentIcon";
+import { ButtonLink } from "@/components/ui/Button";
+import { Panel } from "@/components/ui/Panel";
+import { Tag } from "@/components/ui/Bits";
+import {
+  buildSamplerGrid,
+  SAMPLER_PALETTE,
+  SAMPLER_WIDTH,
+} from "@/lib/demo/sampler";
 
-export default function HomePage() {
-  return (
-    <main className="min-h-screen overflow-x-hidden px-4 py-5 sm:py-8">
-      <section className="mx-auto grid w-full max-w-6xl gap-4 lg:grid-cols-[330px_1fr]">
-        <aside className="comic-panel bg-[#fffaf0] p-4 sm:p-5">
-          <p className="mb-2 text-[11px] font-black uppercase tracking-wide text-[#8b6347]">
-            StitchCraft Studio
-          </p>
-          <h1 className="text-3xl font-black leading-tight text-[#251a1c] sm:text-4xl">
-            Make a chart, then work it row by row.
-          </h1>
-          <p className="mt-3 text-sm leading-relaxed text-[#5f4c42]">
-            Start from a description, a garment photo, an exact chart image, or a blank grid. Every project opens with a shopping list, setup steps, chart sections, and finishing.
-          </p>
+export const metadata: Metadata = {
+  title: "StitchCraft Studio — knitting & crochet pattern builder",
+};
 
-          <div className="mt-5 grid gap-2">
-            {primaryActions.map(({ href, label, detail, icon: Icon, className }) => (
-              <Link
-                key={href}
-                href={href}
-                className="group flex items-center gap-3 rounded-lg border-2 border-[#251a1c] bg-[#fff0bf] p-3 shadow-[4px_4px_0_#251a1c] transition-transform hover:-translate-y-0.5"
-              >
-                <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-md border-2 border-[#251a1c] ${className}`}>
-                  <Icon size={18} color="white" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-black text-[#251a1c]">{label}</span>
-                  <span className="block text-[11px] leading-relaxed text-[#5f4c42]">{detail}</span>
-                </span>
-                <ArrowRight size={15} className="shrink-0 text-[#251a1c]" />
-              </Link>
-            ))}
-          </div>
-        </aside>
-
-        <div className="grid gap-4">
-          <section className="comic-panel overflow-hidden bg-[#251a1c]">
-            <div className="flex items-center justify-between border-b-[3px] border-[#251a1c] bg-[#ffd166] px-4 py-3">
-              <span className="text-sm font-black uppercase tracking-wide text-[#251a1c]">Static project preview</span>
-              <span className="rounded-md border-2 border-[#251a1c] bg-[#fffaf0] px-2 py-1 text-[10px] font-black text-[#251a1c]">
-                row 1 starts at the bottom
-              </span>
-            </div>
-            <div className="grid gap-0 bg-[#fffaf0] md:grid-cols-[1fr_220px]">
-              <div className="p-3 sm:p-4">
-                <div className="grid max-h-[520px] min-h-[360px] overflow-hidden rounded-lg border-2 border-[#251a1c] bg-[#fffaf0] p-2" style={{ gridTemplateColumns: "repeat(38, minmax(0, 1fr))" }}>
-                  {Array.from({ length: 38 * 48 }, (_, index) => {
-                    const row = Math.floor(index / 38);
-                    const col = index % 38;
-                    return (
-                      <span
-                        key={index}
-                        className="aspect-square border border-[#251a1c]/10"
-                        style={{ backgroundColor: sampleChartCell(row, col) }}
-                      />
-                    );
-                  })}
-                </div>
-              </div>
-              <div className="border-t-[3px] border-[#251a1c] bg-[#fff0bf] p-4 md:border-l-[3px] md:border-t-0">
-                <p className="mb-3 text-[11px] font-black uppercase tracking-wide text-[#8b6347]">
-                  Project order
-                </p>
-                <ol className="space-y-2 text-xs font-black text-[#251a1c]">
-                  {["Shopping list", "Start here", "Front chart", "Back chart", "Sleeves", "Finish off"].map((label, index) => (
-                    <li key={label} className="flex items-center gap-2">
-                      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full border-2 border-[#251a1c] bg-[#fffaf0] text-[10px]">
-                        {index + 1}
-                      </span>
-                      <span>{label}</span>
-                    </li>
-                  ))}
-                </ol>
-                <p className="mt-4 text-[11px] leading-relaxed text-[#5f4c42]">
-                  This preview is informational. Use the action buttons on the left to create, draw, learn, or reopen a project.
-                </p>
-              </div>
-            </div>
-          </section>
-
-          <section className="grid gap-3 sm:grid-cols-3">
-            {garmentExamples.map((item) => (
-              <div key={item.type} className="comic-panel flex items-center gap-3 bg-[#fffaf0] p-3">
-                <GarmentIcon type={item.type} active className="h-14 w-14 shrink-0" />
-                <div>
-                  <h2 className="text-sm font-black text-[#251a1c]">{item.type}</h2>
-                  <p className="text-[11px] leading-relaxed text-[#5f4c42]">{item.text}</p>
-                </div>
-              </div>
-            ))}
-          </section>
-        </div>
-      </section>
-    </main>
-  );
-}
-
-function sampleChartCell(row: number, col: number): string {
-  const topBand = row < 16;
-  const middleBand = row >= 16 && row < 29;
-  const hem = row >= 42 && col % 2 === 0;
-  const penguin =
-    row >= 7 && row <= 13 && col >= 17 && col <= 21 &&
-    !(row === 7 && (col < 18 || col > 20)) &&
-    !(row === 13 && (col < 18 || col > 20));
-  const letterLine =
-    (row === 22 || row === 25) &&
-    ((col >= 5 && col <= 11) || (col >= 14 && col <= 19) || (col >= 23 && col <= 31));
-  const underline = row === 27 && col >= 17 && col <= 22;
-  if (penguin) return col === 19 && row > 8 && row < 13 ? "#fffaf0" : "#251a1c";
-  if (letterLine) return "#251a1c";
-  if (underline) return "#f26b5e";
-  if (middleBand) return "#fffaf0";
-  if (hem) return "#8b6347";
-  return topBand || row >= 29 ? "#b64236" : "#fffaf0";
-}
-
-const primaryActions = [
+const ACTIONS = [
   {
     href: "/generate",
     label: "Pattern Studio",
-    detail: "Describe, import, or extract a garment design.",
-    icon: Sparkles,
-    className: "bg-[#f26b5e]",
+    detail: "Describe a garment and get real gauge maths, sized to fit.",
+    accent: "bg-berry",
   },
   {
     href: "/chart-editor",
     label: "Chart Editor",
-    detail: "Draw or import a chart by section.",
-    icon: PenLine,
-    className: "bg-[#2c7be5]",
+    detail: "Colourwork, cables, lace and texture on one grid.",
+    accent: "bg-cobalt",
   },
   {
     href: "/learn",
-    label: "Quick Learn",
-    detail: "Open stitch and technique lessons.",
-    icon: BookOpen,
-    className: "bg-[#4fae68]",
+    label: "Stitch Library",
+    detail: "Every stitch drawn, not photographed badly.",
+    accent: "bg-fern",
   },
   {
     href: "/saved",
     label: "My Library",
-    detail: "Return to saved projects and charts.",
-    icon: FolderOpen,
-    className: "bg-[#8b6347]",
+    detail: "Your projects, saved in this browser.",
+    accent: "bg-grape",
+  },
+] as const;
+
+const PROMISES = [
+  {
+    title: "The numbers add up",
+    body: "Stitch counts come from your measurements, ease and gauge — with a running count on every row, so you always know if you have gone wrong.",
+  },
+  {
+    title: "Counts out loud",
+    body: "Say “one” to tally a stitch, “next row” to advance, “where am I” to hear your place. Your hands never leave the needles.",
+  },
+  {
+    title: "Stays on your machine",
+    body: "Every project lives in this browser. No account, no upload, nothing sent anywhere.",
   },
 ];
 
-const garmentExamples = [
-  { type: "Cardigan", text: "Back, fronts, bands, sleeves, optional pockets, and finishing stay linked." },
-  { type: "Sweater", text: "Crew necks use neckbands; turtlenecks use real collar sections." },
-  { type: "Gloves", text: "Small accessories can still use exact charts, imported grids, and row tracking." },
+const GARMENTS = [
+  { type: "Cardigan", text: "Back, fronts, bands and sleeves, sized together." },
+  { type: "Sweater", text: "Set-in, raglan or yoke — each shapes differently." },
+  { type: "Gloves", text: "Thumb gussets and finger divisions, worked out for you." },
 ];
+
+export default function HomePage() {
+  const grid = buildSamplerGrid();
+
+  return (
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
+      {/* ---- hero ---------------------------------------------------- */}
+      <section className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:items-center">
+        <div>
+          <Tag tone="gold">Knit &amp; crochet</Tag>
+          <h1 className="mt-4 font-display text-2xl leading-[1.6] text-ink sm:text-[28px] sm:leading-[1.6]">
+            A chart is
+            <br />
+            <span className="text-berry">pixel art</span>
+            <br />
+            you can wear.
+          </h1>
+          <p className="mt-5 max-w-md text-base text-ink-soft">
+            Design the chart, let the maths size it to a real body, then work it
+            row by row — counting out loud, hands free.
+          </p>
+
+          <div className="mt-7 flex flex-wrap gap-3">
+            <ButtonLink href="/generate" size="lg">
+              Start a pattern
+            </ButtonLink>
+            <ButtonLink href="/chart-editor" variant="secondary" size="lg">
+              Open the grid
+            </ButtonLink>
+          </div>
+        </div>
+
+        {/* ---- chart sampler ------------------------------------------ */}
+        <figure className="panel">
+          <figcaption className="flex items-center justify-between gap-3 border-b-[3px] border-ink bg-gold px-4 py-2.5">
+            <span className="label">Fair Isle sampler</span>
+            <span className="label text-ink/70">row 1 at the bottom</span>
+          </figcaption>
+          <div className="bg-panel p-3">
+            <div
+              className="grid gap-0 border-[3px] border-ink"
+              style={{
+                gridTemplateColumns: `repeat(${SAMPLER_WIDTH}, minmax(0, 1fr))`,
+              }}
+              role="img"
+              aria-label="A knitting chart showing two Nordic star motifs above a row of diamonds"
+            >
+              {grid.flatMap((row, y) =>
+                row.map((cell, x) => (
+                  <span
+                    key={`${y}-${x}`}
+                    className="aspect-square"
+                    style={{ backgroundColor: SAMPLER_PALETTE[cell] }}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+        </figure>
+      </section>
+
+      {/* ---- what it actually does ----------------------------------- */}
+      <section className="mt-14 grid gap-4 sm:grid-cols-3">
+        {PROMISES.map((p) => (
+          <Panel key={p.title} title={p.title} accent="cobalt">
+            <p className="text-sm text-ink-soft">{p.body}</p>
+          </Panel>
+        ))}
+      </section>
+
+      {/* ---- entry points -------------------------------------------- */}
+      <section className="mt-14">
+        <h2 className="label mb-4 text-ink-faint">Where to start</h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {ACTIONS.map(({ href, label, detail, accent }) => (
+            <Link
+              key={href}
+              href={href}
+              className="panel lift flex items-center gap-4 p-4"
+            >
+              <span
+                className={`${accent} h-11 w-11 shrink-0 border-[3px] border-ink`}
+                aria-hidden
+              />
+              <span className="min-w-0">
+                <span className="label block text-ink">{label}</span>
+                <span className="mt-1 block text-sm text-ink-soft">{detail}</span>
+              </span>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      {/* ---- garments ------------------------------------------------ */}
+      <section className="mt-14">
+        <h2 className="label mb-4 text-ink-faint">Built to fit</h2>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {GARMENTS.map((item) => (
+            <div key={item.type} className="panel flex items-center gap-3 p-4">
+              <GarmentIcon type={item.type} active className="h-14 w-14 shrink-0" />
+              <div className="min-w-0">
+                <h3 className="label text-ink">{item.type}</h3>
+                <p className="mt-1 text-sm text-ink-soft">{item.text}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}

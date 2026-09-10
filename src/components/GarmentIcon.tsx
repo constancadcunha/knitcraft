@@ -6,14 +6,30 @@ type GarmentIconProps = {
   className?: string;
 } & Omit<SVGProps<SVGSVGElement>, "type">;
 
+/**
+ * Icon colours come from the design-system tokens rather than literals, so a
+ * palette change lands here too. CSS custom properties resolve fine inside SVG
+ * presentation attributes.
+ *
+ * The inactive state desaturates by dropping to the muted ink and the sunk
+ * surface, rather than by using a second, parallel set of colours.
+ */
 function colors(active: boolean | undefined) {
-  return {
-    ink: active ? "#251a1c" : "#8b6347",
-    fill: active ? "#fff0bf" : "#fffaf0",
-    accent: active ? "#f26b5e" : "#c4a07e",
-    blue: active ? "#2c7be5" : "#8fb0d6",
-    green: active ? "#4fae68" : "#8caf8a",
-  };
+  return active
+    ? {
+        ink: "var(--color-ink)",
+        fill: "var(--color-gold)",
+        accent: "var(--color-berry)",
+        blue: "var(--color-cobalt)",
+        green: "var(--color-fern)",
+      }
+    : {
+        ink: "var(--color-ink-faint)",
+        fill: "var(--color-panel-sunk)",
+        accent: "var(--color-ink-faint)",
+        blue: "var(--color-ink-faint)",
+        green: "var(--color-ink-faint)",
+      };
 }
 
 export function GarmentIcon({ type, active, className = "h-12 w-12", ...props }: GarmentIconProps) {
@@ -84,7 +100,7 @@ export function GarmentIcon({ type, active, className = "h-12 w-12", ...props }:
       return (
         <svg {...common}>
           <ellipse cx="32" cy="29" rx="23" ry="16" fill={c.green} fillOpacity=".28" stroke={c.ink} strokeWidth="3" />
-          <ellipse cx="32" cy="29" rx="13" ry="8" fill="#fffaf0" stroke={c.ink} strokeWidth="3" />
+          <ellipse cx="32" cy="29" rx="13" ry="8" fill={c.fill} stroke={c.ink} strokeWidth="3" />
           <path d="M12 28c7 5 33 5 40 0" stroke={c.accent} strokeWidth="3" strokeLinecap="round" />
         </svg>
       );

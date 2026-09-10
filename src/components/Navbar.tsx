@@ -3,95 +3,96 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { Sparkles, LayoutGrid, BookMarked, Menu, X, GraduationCap } from "lucide-react";
+import YarnMark from "@/components/YarnMark";
 
-const links = [
-  { href: "/generate", label: "Pattern Studio", Icon: Sparkles },
-  { href: "/chart-editor", label: "Chart Editor", Icon: LayoutGrid },
-  { href: "/learn", label: "Quick Learn", Icon: GraduationCap },
-  { href: "/saved", label: "My Library", Icon: BookMarked },
+const LINKS = [
+  { href: "/generate", label: "Studio" },
+  { href: "/chart-editor", label: "Charts" },
+  { href: "/learn", label: "Learn" },
+  { href: "/saved", label: "Library" },
 ];
 
 export default function Navbar() {
   const pathname = usePathname();
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [open, setOpen] = useState(false);
 
   return (
-    <nav className="sticky top-0 z-50 bg-white/60 backdrop-blur-md border-b border-[#d4c4b0]/30 shadow-sm">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 flex items-center justify-between h-[60px]">
-        <Link href="/" className="flex items-center gap-2.5 group">
-          <YarnMark />
-          <span
-            className="text-xl font-bold text-[#4a3f35] group-hover:text-[#c89b7e] transition-colors"
-            style={{ fontFamily: "var(--font-lora), serif" }}
-          >
-            StitchCraft Studio
+    <header className="sticky top-0 z-50 border-b-[3px] border-ink bg-panel">
+      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
+        <Link
+          href="/"
+          className="group flex items-center gap-2.5"
+          aria-label="StitchCraft Studio home"
+        >
+          <span className="border-[3px] border-ink bg-paper p-1 shadow-pop-sm transition-transform group-hover:-translate-y-0.5">
+            <YarnMark size={26} />
+          </span>
+          <span className="font-display text-[11px] leading-tight text-ink">
+            Stitch<span className="text-berry">Craft</span>
           </span>
         </Link>
 
-        <div className="hidden sm:flex items-center gap-1">
-          {links.map(({ href, label, Icon }) => {
-            const active = pathname.startsWith(href);
+        <nav className="hidden items-center gap-1.5 sm:flex" aria-label="Main">
+          {LINKS.map(({ href, label }) => {
+            const active = pathname === href || pathname.startsWith(`${href}/`);
             return (
               <Link
-                key={`${href}-${label}`}
+                key={href}
                 href={href}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-medium transition-all ${
+                aria-current={active ? "page" : undefined}
+                className={`label border-[3px] border-ink px-3 py-2 transition-transform ${
                   active
-                    ? "bg-[#c89b7e]/20 text-[#8b6f47]"
-                    : "text-[#4a3f35] hover:bg-[#e8ddd0]/50 hover:text-[#4a3f35]"
+                    ? "bg-berry text-panel shadow-pop-sm"
+                    : "bg-panel text-ink hover:-translate-y-0.5 hover:bg-gold hover:shadow-pop-sm"
                 }`}
               >
-                <Icon size={14} />
                 {label}
               </Link>
             );
           })}
-        </div>
+        </nav>
 
         <button
-          className="sm:hidden p-2 rounded-xl hover:bg-[#e8ddd0]/50 transition-colors text-[#4a3f35]"
-          onClick={() => setMenuOpen((o) => !o)}
-          aria-label="Toggle menu"
+          type="button"
+          className="press bg-panel px-3 py-2 text-ink sm:hidden"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-controls="mobile-nav"
         >
-          {menuOpen ? <X size={20} /> : <Menu size={20} />}
+          {open ? "Close" : "Menu"}
         </button>
       </div>
 
-      {menuOpen && (
-        <div className="sm:hidden border-t border-[#d4c4b0]/30 bg-white/95 backdrop-blur-sm px-4 pb-4 pt-2 flex flex-col gap-1">
-          {links.map(({ href, label, Icon }) => {
-            const active = pathname.startsWith(href);
-            return (
-              <Link
-                key={`${href}-${label}`}
-                href={href}
-                onClick={() => setMenuOpen(false)}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                  active
-                    ? "bg-[#c89b7e]/20 text-[#8b6f47]"
-                    : "text-[#4a3f35] hover:bg-[#e8ddd0]/50"
-                }`}
-              >
-                <Icon size={15} />
-                {label}
-              </Link>
-            );
-          })}
-        </div>
+      {open && (
+        <nav
+          id="mobile-nav"
+          aria-label="Main"
+          className="border-t-[3px] border-ink bg-panel-sunk px-4 py-3 sm:hidden"
+        >
+          <ul className="flex flex-col gap-2">
+            {LINKS.map(({ href, label }) => {
+              const active =
+                pathname === href || pathname.startsWith(`${href}/`);
+              return (
+                <li key={href}>
+                  <Link
+                    href={href}
+                    onClick={() => setOpen(false)}
+                    aria-current={active ? "page" : undefined}
+                    className={`label block border-[3px] border-ink px-3 py-2.5 ${
+                      active
+                        ? "bg-berry text-panel shadow-pop-sm"
+                        : "bg-panel text-ink"
+                    }`}
+                  >
+                    {label}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
       )}
-    </nav>
-  );
-}
-
-function YarnMark() {
-  return (
-    <svg width="30" height="30" viewBox="0 0 30 30" fill="none">
-      <circle cx="15" cy="15" r="13" fill="#f5ede0" stroke="#c4a07e" strokeWidth="1.5"/>
-      <path d="M7 15c2-7 9-9 13-4" stroke="#c9785c" strokeWidth="1.5" strokeLinecap="round"/>
-      <path d="M8 19c3-6 11-7 15-2" stroke="#8b6347" strokeWidth="1.5" strokeLinecap="round"/>
-      <path d="M11 9c4-2 10 0 11 7" stroke="#6a9470" strokeWidth="1.5" strokeLinecap="round"/>
-      <circle cx="15" cy="15" r="2.5" fill="#c4a07e"/>
-    </svg>
+    </header>
   );
 }

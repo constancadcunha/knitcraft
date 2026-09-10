@@ -1,40 +1,70 @@
-import type { Metadata } from "next";
-import { Lora, Inter } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Press_Start_2P, Silkscreen, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { StoreProvider } from "@/lib/store";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 
-const lora = Lora({
-  variable: "--font-lora",
+/** Logo and hero only — this face is extremely wide. Never set prose in it. */
+const pressStart = Press_Start_2P({
+  variable: "--font-press-start",
+  weight: "400",
   subsets: ["latin"],
   display: "swap",
 });
 
-const inter = Inter({
-  variable: "--font-inter",
+/** UI chrome: buttons, nav, labels, badges, table headers. */
+const silkscreen = Silkscreen({
+  variable: "--font-silkscreen",
+  weight: ["400", "700"],
+  subsets: ["latin"],
+  display: "swap",
+});
+
+/** Everything a human actually reads: instructions, descriptions, inputs. */
+const spaceGrotesk = Space_Grotesk({
+  variable: "--font-space-grotesk",
   subsets: ["latin"],
   display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "StitchCraft Studio - Knitting & Crochet Pattern Builder",
+  title: {
+    default: "StitchCraft Studio — knitting & crochet pattern builder",
+    template: "%s · StitchCraft Studio",
+  },
   description:
-    "Create size-aware knitting and crochet patterns, design charts, and track your progress row by row.",
+    "Design charts, generate size-accurate knitting and crochet patterns from real gauge maths, and count your stitches hands-free.",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#f7efdd",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" data-scroll-behavior="smooth" className={`${lora.variable} ${inter.variable}`}>
-      <body className="min-h-screen flex flex-col">
+    <html
+      lang="en"
+      data-scroll-behavior="smooth"
+      className={`${pressStart.variable} ${silkscreen.variable} ${spaceGrotesk.variable}`}
+    >
+      <body className="flex min-h-dvh flex-col">
+        <a
+          href="#main"
+          className="press sr-only bg-gold px-3 py-2 focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[100]"
+        >
+          Skip to content
+        </a>
         <StoreProvider>
           <Navbar />
-          <main className="flex-1">{children}</main>
-          <footer className="border-t border-[#e8ddd0] py-6 text-center text-sm text-[#8b7968] bg-white">
-            <p className="font-bold italic text-base text-[#4a3f35] mb-1" style={{ fontFamily: "var(--font-lora), serif" }}>StitchCraft Studio</p>
-            <p className="text-[#8b7968]/70">Made with love for knitters &amp; crocheters everywhere</p>
-          </footer>
+          <main id="main" className="flex-1">
+            {children}
+          </main>
+          <Footer />
         </StoreProvider>
       </body>
     </html>
