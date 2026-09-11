@@ -409,6 +409,20 @@ img[data-pixel] {
   margin-inline: auto;
 }
 
+/* The other half of the pair: show the WHOLE piece, scaled to the column.
+   `height: auto` is what kills the empty band — the SVG then takes its height
+   from the viewBox ratio instead of from its own height attribute. */
+.chart-fit {
+  background: var(--color-panel);
+  border: 3px solid var(--color-ink);
+  box-shadow: var(--shadow-inset-pop);
+  padding: 0.625rem;
+}
+.chart-fit > svg {
+  width: 100%;
+  height: auto;
+}
+
 /* --- stat: a readout meant to be legible from across the room -----------
    The tracker is looked at from wherever the knitting is — a metre away, on a
    phone propped against a mug. These numbers are sized for that distance, not
