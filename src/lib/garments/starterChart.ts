@@ -17,7 +17,7 @@ import {
   type ChartCraft,
   type SymbolChart,
   createChart,
-  placeSymbol,
+  getSymbol,
 } from "../chart";
 import type { Craft } from "../knit";
 import type { WorkedAs } from "./types";
@@ -93,17 +93,35 @@ export function starterChartFor(input: StarterChartInput): SymbolChart {
   const purlId = input.craft === "crochet" ? (stitch === "sc" ? "sc" : "bpdc") : "p";
   const postId = input.craft === "crochet" ? (stitch === "sc" ? "sc" : "fpdc") : "k";
 
+  // Fill the grid directly rather than through placeSymbol.
+  //
+  // placeSymbol is the immutable EDITING api: it clones the whole chart on
+  // every call so an edit can never half-apply. Calling it once per cell to
+  // build a fresh chart is quadratic — a 60x60 panel did 3,600 full grid
+  // clones and took ~240 ms, which the chart editor pays every time you pick a
+  // garment. We own this chart until we return it, so we can write the cells.
+  //
+  // Safe because every id used here is exactly one cell wide, so there are no
+  // continuation cells and the multi-cell invariant cannot be broken. That is
+  // asserted below rather than assumed.
+  for (const id of [plainId, purlId, postId]) {
+    const symbol = getSymbol(id);
+    if (!symbol || symbol.width !== 1) {
+      throw new Error(`starter chart needs 1-cell symbols; "${id}" is ${symbol ? `${symbol.width} wide` : "unknown"}`);
+    }
+  }
+
   for (let row = 0; row < height; row += 1) {
     const inEdge = row < edgeRows;
+    const cells = chart.rows[row];
     for (let col = 0; col < width; col += 1) {
       // 2x2 rib: two columns of knit, two of purl. In the round every round is
       // worked the same way, so the column pattern is all the chart needs.
       const ribKnit = col % 4 < 2;
-      const id = inEdge ? (ribKnit ? postId : purlId) : plainId;
-      const placed = placeSymbol(chart, row, col, id);
-      // placeSymbol only fails for an unknown/oversized symbol; every id here is
-      // 1 cell wide and craft-correct, so a failure means the catalogue changed.
-      if (placed.ok) chart = placed.value;
+      cells[col] = {
+        colorIndex: 0,
+        symbolId: inEdge ? (ribKnit ? postId : purlId) : plainId,
+      };
     }
   }
 

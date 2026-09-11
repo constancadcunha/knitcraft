@@ -1,219 +1,206 @@
 "use client";
 
+import { useCallback, useSyncExternalStore, type ReactNode } from "react";
+import type { ChartProgress, Project } from "@/types";
 import {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  useCallback,
-  type ReactNode,
-} from "react";
-import type { Pattern, SavedChart } from "@/types";
-import { isActiveChartCell } from "@/lib/shapes";
-import { generateId } from "@/lib/id";
+  deleteProject as deleteFromStorage,
+  getLocalStorage,
+  loadProjects,
+  saveProject as saveToStorage,
+  type StorageFailure,
+} from "@/lib/project/persistence";
 
-interface StoreState {
-  patterns: Pattern[];
-  charts: SavedChart[];
-  savePattern: (pattern: Pattern) => void;
-  updatePattern: (id: string, updates: Partial<Pattern>) => void;
-  deletePattern: (id: string) => void;
-  saveChart: (chart: SavedChart) => void;
-  updateChart: (id: string, updates: Partial<SavedChart>) => void;
-  deleteChart: (id: string) => void;
-  getPattern: (id: string) => Pattern | undefined;
-  getChart: (id: string) => SavedChart | undefined;
-  toggleRowCompleted: (patternId: string, sectionName: string, rowNumber: number) => void;
-  /** Toggle all cells in a row on/off. If every cell in the row is done, clears them; otherwise marks all. */
-  toggleChartRowCompleted: (chartId: string, rowNumber: number, rowWidth?: number) => void;
-  /** Toggle a single stitch cell. */
-  toggleChartCellCompleted: (chartId: string, row: number, col: number) => void;
+/**
+ * The client store.
+ *
+ * Modelled as a module-level external store read through `useSyncExternalStore`
+ * rather than as component state loaded in an effect. Three reasons:
+ *
+ *  1. The React Compiler forbids calling setState from an effect, and hydrating
+ *     from localStorage in an effect is exactly that.
+ *  2. localStorage IS external state. Two mounted components must see the same
+ *     projects, and a write from one must reach the other.
+ *  3. The server snapshot is always empty, so there is no hydration mismatch:
+ *     the server cannot know what is in the browser.
+ *
+ * Everything stays on the device. There is no backend and no network call here.
+ */
+
+export interface StoreSnapshot {
+  projects: Project[];
+  /** False until the first read from storage has happened. */
+  loaded: boolean;
+  /** Set when stored data was unreadable and had to be discarded. */
+  discardedNotice: string | null;
+  /** Set when storage itself is failing — quota, private mode, disabled. */
+  storageError: StorageFailure | null;
 }
 
-const StoreContext = createContext<StoreState | null>(null);
+const EMPTY: StoreSnapshot = {
+  projects: [],
+  loaded: false,
+  discardedNotice: null,
+  storageError: null,
+};
 
-function loadFromStorage<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
+let snapshot: StoreSnapshot = EMPTY;
+const listeners = new Set<() => void>();
+
+function emit() {
+  for (const listener of listeners) listener();
+}
+
+/** Replace the snapshot. The object identity must change for React to re-render. */
+function setSnapshot(next: Partial<StoreSnapshot>) {
+  snapshot = { ...snapshot, ...next };
+  emit();
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+/**
+ * Read from storage exactly once, lazily, on the first client snapshot.
+ * getSnapshot must be cheap and must return a stable reference, so the load
+ * happens here and then never again.
+ */
+function getSnapshot(): StoreSnapshot {
+  if (!snapshot.loaded) {
+    const storage = getLocalStorage();
+    const result = loadProjects(storage);
+    snapshot = {
+      projects: result.projects,
+      loaded: true,
+      discardedNotice: result.discarded ? (result.discardedReason ?? null) : null,
+      storageError: result.error ?? null,
+    };
   }
+  return snapshot;
 }
 
-function saveToStorage(key: string, value: unknown) {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Quota exceeded: silently ignore.
-  }
+function getServerSnapshot(): StoreSnapshot {
+  return EMPTY;
 }
 
+function persist(projects: Project[], changed: Project | null, removedId?: string) {
+  const storage = getLocalStorage();
+  const ids = projects.map((p) => p.id);
+  const result = changed
+    ? saveToStorage(storage, changed, ids)
+    : removedId
+      ? deleteFromStorage(storage, removedId, ids)
+      : { ok: true as const };
+
+  setSnapshot({
+    projects,
+    // A failed write must be visible: silently losing a project is the worst
+    // outcome for someone who has spent hours on it.
+    storageError: result.ok ? null : result.error,
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Mutations                                                                   */
+/* -------------------------------------------------------------------------- */
+
+export function putProject(project: Project) {
+  const current = getSnapshot().projects;
+  const index = current.findIndex((p) => p.id === project.id);
+  const stamped: Project = { ...project, updatedAt: new Date().toISOString() };
+  const next =
+    index === -1
+      ? [stamped, ...current]
+      : current.map((p) => (p.id === project.id ? stamped : p));
+  persist(next, stamped);
+}
+
+export function removeProject(id: string) {
+  const next = getSnapshot().projects.filter((p) => p.id !== id);
+  persist(next, null, id);
+}
+
+/** Apply a change to one project, saving only that project. */
+export function mutateProject(id: string, change: (project: Project) => Project) {
+  const current = getSnapshot().projects;
+  const existing = current.find((p) => p.id === id);
+  if (!existing) return;
+  const updated: Project = { ...change(existing), updatedAt: new Date().toISOString() };
+  persist(
+    current.map((p) => (p.id === id ? updated : p)),
+    updated
+  );
+}
+
+/**
+ * Apply a change to one chart's progress. This is the path the tracker and the
+ * voice counter both go through, so every stitch counted aloud is persisted
+ * the same way as one clicked by hand.
+ */
+export function mutateChartProgress(
+  projectId: string,
+  chartId: string,
+  change: (progress: ChartProgress) => ChartProgress
+) {
+  mutateProject(projectId, (project) => {
+    const existing = project.progress.charts[chartId];
+    if (!existing) return project;
+    return {
+      ...project,
+      progress: {
+        ...project.progress,
+        charts: { ...project.progress.charts, [chartId]: change(existing) },
+        lastWorkedAt: new Date().toISOString(),
+      },
+    };
+  });
+}
+
+export function dismissDiscardedNotice() {
+  setSnapshot({ discardedNotice: null });
+}
+
+/* -------------------------------------------------------------------------- */
+/* React surface                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Kept as a component so the app's tree does not change shape, though the store
+ * itself no longer needs a context: any component can subscribe directly.
+ */
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [patterns, setPatterns] = useState<Pattern[]>([]);
-  const [charts, setCharts] = useState<SavedChart[]>([]);
-  const [hydrated, setHydrated] = useState(false);
-
-  /* eslint-disable react-hooks/set-state-in-effect */
-  useEffect(() => {
-    setPatterns(loadFromStorage<Pattern[]>("kc_patterns", []));
-    setCharts(loadFromStorage<SavedChart[]>("kc_charts", []));
-    setHydrated(true);
-  }, []);
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  useEffect(() => {
-    if (hydrated) saveToStorage("kc_patterns", patterns);
-  }, [patterns, hydrated]);
-
-  useEffect(() => {
-    if (hydrated) saveToStorage("kc_charts", charts);
-  }, [charts, hydrated]);
-
-  const savePattern = useCallback((pattern: Pattern) => {
-    setPatterns((prev) => {
-      const exists = prev.find((p) => p.id === pattern.id);
-      if (exists) return prev.map((p) => (p.id === pattern.id ? pattern : p));
-      return [pattern, ...prev];
-    });
-  }, []);
-
-  const updatePattern = useCallback((id: string, updates: Partial<Pattern>) => {
-    setPatterns((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, ...updates } : p))
-    );
-  }, []);
-
-  const deletePattern = useCallback((id: string) => {
-    setPatterns((prev) => prev.filter((p) => p.id !== id));
-  }, []);
-
-  const saveChart = useCallback((chart: SavedChart) => {
-    setCharts((prev) => {
-      const exists = prev.find((c) => c.id === chart.id);
-      if (exists) return prev.map((c) => (c.id === chart.id ? chart : c));
-      return [chart, ...prev];
-    });
-  }, []);
-
-  const updateChart = useCallback((id: string, updates: Partial<SavedChart>) => {
-    setCharts((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, ...updates } : c))
-    );
-  }, []);
-
-  const deleteChart = useCallback((id: string) => {
-    setCharts((prev) => prev.filter((c) => c.id !== id));
-  }, []);
-
-  const getPattern = useCallback(
-    (id: string) => patterns.find((p) => p.id === id),
-    [patterns]
-  );
-
-  const getChart = useCallback(
-    (id: string) => charts.find((c) => c.id === id),
-    [charts]
-  );
-
-  const toggleRowCompleted = useCallback(
-    (patternId: string, sectionName: string, rowNumber: number) => {
-      setPatterns((prev) =>
-        prev.map((p) => {
-          if (p.id !== patternId) return p;
-          const sectionRows = p.completedRows[sectionName] ?? {};
-          return {
-            ...p,
-            completedRows: {
-              ...p.completedRows,
-              [sectionName]: {
-                ...sectionRows,
-                [rowNumber]: !sectionRows[rowNumber],
-              },
-            },
-          };
-        })
-      );
-    },
-    []
-  );
-
-  const toggleChartRowCompleted = useCallback(
-    (chartId: string, rowNumber: number, rowWidth?: number) => {
-      setCharts((prev) =>
-        prev.map((c) => {
-          if (c.id !== chartId) return c;
-          const cells = c.completedCells ?? {};
-          const width = rowWidth ?? c.width;
-          const activeCols = Array.from({ length: width }, (_, col) => col).filter((col) =>
-            isActiveChartCell(c.shapeKey, c.rowShaping, rowNumber, col, c.width, c.height)
-          );
-          const allDone = activeCols.length > 0 && activeCols.every((col) => cells[`${rowNumber},${col}`]);
-          const next = { ...cells };
-          for (const col of activeCols) {
-            const key = `${rowNumber},${col}`;
-            if (allDone) {
-              delete next[key];
-            } else {
-              next[key] = true;
-            }
-          }
-          return { ...c, completedCells: next };
-        })
-      );
-    },
-    []
-  );
-
-  const toggleChartCellCompleted = useCallback(
-    (chartId: string, row: number, col: number) => {
-      setCharts((prev) =>
-        prev.map((c) => {
-          if (c.id !== chartId) return c;
-          const key = `${row},${col}`;
-          const cells = c.completedCells ?? {};
-          const next = { ...cells };
-          if (next[key]) {
-            delete next[key];
-          } else {
-            next[key] = true;
-          }
-          return { ...c, completedCells: next };
-        })
-      );
-    },
-    []
-  );
-
-  return (
-    <StoreContext.Provider
-      value={{
-        patterns,
-        charts,
-        savePattern,
-        updatePattern,
-        deletePattern,
-        saveChart,
-        updateChart,
-        deleteChart,
-        getPattern,
-        getChart,
-        toggleRowCompleted,
-        toggleChartRowCompleted,
-        toggleChartCellCompleted,
-      }}
-    >
-      {children}
-    </StoreContext.Provider>
-  );
+  return <>{children}</>;
 }
 
-export function useStore(): StoreState {
-  const ctx = useContext(StoreContext);
-  if (!ctx) throw new Error("useStore must be used inside StoreProvider");
-  return ctx;
+export interface StoreApi extends StoreSnapshot {
+  getProject: (id: string) => Project | undefined;
+  putProject: typeof putProject;
+  removeProject: typeof removeProject;
+  mutateProject: typeof mutateProject;
+  mutateChartProgress: typeof mutateChartProgress;
+  dismissDiscardedNotice: typeof dismissDiscardedNotice;
 }
 
-export { generateId };
+export function useStore(): StoreApi {
+  const state = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+
+  const getProject = useCallback(
+    (id: string) => state.projects.find((p) => p.id === id),
+    [state.projects]
+  );
+
+  return {
+    ...state,
+    getProject,
+    putProject,
+    removeProject,
+    mutateProject,
+    mutateChartProgress,
+    dismissDiscardedNotice,
+  };
+}
+
+export { generateId } from "@/lib/id";

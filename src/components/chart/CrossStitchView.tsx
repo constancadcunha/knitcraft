@@ -1,6 +1,10 @@
 "use client";
 
-import type { CrossStitchChart, StitchKind } from "@/lib/crossstitch";
+import type {
+  CellCorner,
+  CrossStitchChart,
+  CrossStitchStitchKind,
+} from "@/types";
 import { cn } from "@/lib/cn";
 
 /**
@@ -26,18 +30,47 @@ export interface CrossStitchViewProps {
   className?: string;
 }
 
-/** Part stitches occupy a triangle or corner of the square. */
-function partStitchPath(kind: StitchKind, x: number, y: number, s: number): string | null {
-  switch (kind) {
-    case "half":
-      return `M${x} ${y + s}L${x + s} ${y}L${x + s} ${y + s}z`;
-    case "quarter":
-      return `M${x} ${y}L${x + s / 2} ${y}L${x + s / 2} ${y + s / 2}L${x} ${y + s / 2}z`;
-    case "three-quarter":
-      return `M${x} ${y}L${x + s} ${y}L${x + s} ${y + s}L${x + s / 2} ${y + s}L${x} ${y + s / 2}z`;
-    default:
-      return null;
+/**
+ * Part stitches occupy a triangle or a corner of the square, and WHICH corner
+ * is part of the design — a three-quarter stitch pointing the wrong way makes
+ * a curve read as a staircase.
+ */
+function partStitchPath(
+  kind: CrossStitchStitchKind,
+  corner: CellCorner | undefined,
+  x: number,
+  y: number,
+  s: number
+): string | null {
+  const h = s / 2;
+  const c: CellCorner = corner ?? "tl";
+
+  if (kind === "half") {
+    // A half stitch is one diagonal of the square, filled as a triangle. Which
+    // way it leans follows the corner it is anchored to.
+    return c === "tr" || c === "bl"
+      ? `M${x} ${y}L${x + s} ${y + s}L${x} ${y + s}z`
+      : `M${x} ${y + s}L${x + s} ${y}L${x + s} ${y + s}z`;
   }
+
+  if (kind === "quarter") {
+    const qx = c === "tr" || c === "br" ? x + h : x;
+    const qy = c === "bl" || c === "br" ? y + h : y;
+    return `M${qx} ${qy}h${h}v${h}h-${h}z`;
+  }
+
+  if (kind === "three-quarter") {
+    // The full square minus the quarter opposite the anchored corner.
+    const cut: Record<CellCorner, string> = {
+      tl: `M${x} ${y}L${x + s} ${y}L${x + s} ${y + h}L${x + h} ${y + h}L${x + h} ${y + s}L${x} ${y + s}z`,
+      tr: `M${x} ${y}L${x + s} ${y}L${x + s} ${y + s}L${x + h} ${y + s}L${x + h} ${y + h}L${x} ${y + h}z`,
+      bl: `M${x} ${y}L${x + h} ${y}L${x + h} ${y + h}L${x + s} ${y + h}L${x + s} ${y + s}L${x} ${y + s}z`,
+      br: `M${x + h} ${y}L${x + s} ${y}L${x + s} ${y + s}L${x} ${y + s}L${x} ${y + h}L${x + h} ${y + h}z`,
+    };
+    return cut[c];
+  }
+
+  return null;
 }
 
 export default function CrossStitchView({
@@ -64,14 +97,14 @@ export default function CrossStitchView({
     >
       {chart.rows.map((row, y) =>
         row.map((cell, x) => {
-          if (cell.colour === null) return null;
-          const floss = chart.palette[cell.colour];
+          if (cell.colorIndex === undefined) return null;
+          const floss = chart.palette[cell.colorIndex];
           if (!floss) return null;
 
           const px = x * cellSize;
           const py = y * cellSize;
-          const kind = cell.kind ?? "full";
-          const part = partStitchPath(kind, px, py, cellSize);
+          const kind = cell.stitch ?? "full";
+          const part = partStitchPath(kind, cell.corner, px, py, cellSize);
           const done = completed?.[`${y},${x}`];
 
           return (
@@ -138,12 +171,12 @@ export default function CrossStitchView({
 
       {/* Backstitch and knots ride on the hole grid, above every cell. */}
       <g shapeRendering="geometricPrecision" pointerEvents="none">
-        {chart.backstitch.map((line, i) => {
-          const floss = chart.palette[line.colour];
+        {chart.backstitch.map((line) => {
+          const floss = chart.palette[line.colorIndex];
           if (!floss) return null;
           return (
             <line
-              key={`bs${i}`}
+              key={line.id}
               x1={line.from.x * cellSize}
               y1={line.from.y * cellSize}
               x2={line.to.x * cellSize}
@@ -154,12 +187,12 @@ export default function CrossStitchView({
             />
           );
         })}
-        {chart.frenchKnots.map((knot, i) => {
-          const floss = chart.palette[knot.colour];
+        {chart.frenchKnots.map((knot) => {
+          const floss = chart.palette[knot.colorIndex];
           if (!floss) return null;
           return (
             <circle
-              key={`fk${i}`}
+              key={knot.id}
               cx={knot.at.x * cellSize}
               cy={knot.at.y * cellSize}
               r={Math.max(2.5, cellSize * 0.2)}

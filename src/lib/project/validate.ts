@@ -16,19 +16,6 @@
  */
 
 import {
-  type ChartProgress,
-  type CraftType,
-  type CrossStitchChart,
-  type Project,
-  type ProjectChart,
-  type ProjectProgress,
-  type SavedChart,
-  type SectionProgress,
-  type CrossStitchProject,
-  type CrossStitchSavedChart,
-  type Difficulty,
-  type YarnProject,
-  type YarnSavedChart,
   CRAFT_TYPES,
   PROJECT_SCHEMA_VERSION,
   UNDO_LIMIT,
@@ -36,6 +23,41 @@ import {
   isGarmentSize,
   isGarmentType,
   isYarnCraft,
+  toGarmentSize,
+  type ChartProgress,
+  type CraftType,
+  type CrossStitchChart,
+  type CrossStitchProject,
+  type CrossStitchSavedChart,
+  type Difficulty,
+  type GarmentType,
+  type Gauge,
+  type Instruction,
+  type NotionKind,
+  type NotionMarker,
+  type Pattern,
+  type Abbreviation,
+  type FabricRequirement,
+  type FlossColor,
+  type FlossRequirement,
+  type NeedleSpec,
+  type YarnRequirement,
+  type YarnSpec,
+  type FinishedMeasurements,
+  type Materials,
+  type PatternSection,
+  type PatternSource,
+  type Project,
+  type ProjectChart,
+  type ProjectProgress,
+  type ProjectSource,
+  type RibbingPattern,
+  type RibbingPlacement,
+  type RibbingSpec,
+  type SavedChart,
+  type SectionProgress,
+  type YarnProject,
+  type YarnSavedChart,
 } from "@/types";
 import type { SymbolChart } from "@/lib/chart";
 import { chartGeometry } from "./geometry";
@@ -120,8 +142,8 @@ function parseSavedChart(value: unknown, craft: CraftType): SavedChart | null {
     role: value.role === "swatch" || value.role === "reference" ? value.role : "chart",
     piece: str(value.piece, chart.name),
     order: int(value.order, 0),
-    ribbing: isRecord(value.ribbing) ? (value.ribbing as SavedChart["ribbing"]) : null,
-    notions: Array.isArray(value.notions) ? (value.notions as SavedChart["notions"]) : [],
+    ribbing: parseRibbing(value.ribbing),
+    notions: parseNotions(value.notions),
     notes: str(value.notes),
     createdAt: str(value.createdAt, now),
     updatedAt: str(value.updatedAt, now),
@@ -201,6 +223,296 @@ function parseProgress(value: unknown, charts: SavedChart[]): ProjectProgress {
 /* -------------------------------------------------------------------------- */
 
 /** Parse one stored project, or `null` if it cannot be trusted. */
+
+/* -------------------------------------------------------------------------- */
+/* Field validators                                                            */
+/*                                                                            */
+/* These parse values that came out of localStorage, so they are untrusted:    */
+/* a user can edit them, and an older build may have written a different       */
+/* shape. Casting straight to the target type would push a malformed object    */
+/* into the app and crash a page later, far from the cause. Each validator     */
+/* below returns the fallback instead.                                         */
+/* -------------------------------------------------------------------------- */
+
+const RIBBING_PATTERNS: readonly RibbingPattern[] = ["1x1", "2x2", "2x1", "garter", "seed", "moss"];
+const RIBBING_PLACEMENTS: readonly RibbingPlacement[] = ["hem", "cuff", "neck", "band", "brim"];
+const NOTION_KINDS: readonly NotionKind[] = [
+  "button", "buttonhole", "zipper", "stitch-marker", "seam", "pocket", "eyelet",
+];
+const PATTERN_SOURCES: readonly PatternSource[] = ["wizard", "text", "image", "import"];
+
+function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T | null {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value)
+    ? (value as T)
+    : null;
+}
+
+function parseRibbing(value: unknown): RibbingSpec | null {
+  if (!isRecord(value)) return null;
+  const pattern = oneOf(value.pattern, RIBBING_PATTERNS);
+  const placement = oneOf(value.placement, RIBBING_PLACEMENTS);
+  if (!pattern || !placement) return null;
+  const rows = int(value.rows, 0);
+  if (rows < 0) return null;
+  return { pattern, placement, rows, needleStepDown: bool(value.needleStepDown) };
+}
+
+function parseNotions(value: unknown): NotionMarker[] {
+  if (!Array.isArray(value)) return [];
+  const out: NotionMarker[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) continue;
+    const kind = oneOf(entry.kind, NOTION_KINDS);
+    if (!kind) continue;
+    const rowIndex = int(entry.rowIndex, -1);
+    const colIndex = int(entry.colIndex, -1);
+    // A marker with no position cannot be drawn, so it is dropped rather than
+    // silently pinned to (0,0) where it would look deliberate.
+    if (rowIndex < 0 || colIndex < 0) continue;
+    const id = str(entry.id);
+    out.push({
+      id: id || `notion-${kind}-${rowIndex}-${colIndex}`,
+      kind,
+      rowIndex,
+      colIndex,
+      ...(typeof entry.label === "string" ? { label: entry.label } : {}),
+    });
+  }
+  return out;
+}
+
+function parseSource(value: unknown): ProjectSource {
+  const fallback: ProjectSource = { kind: "wizard" };
+  if (!isRecord(value)) return fallback;
+  const kind = oneOf(value.kind, PATTERN_SOURCES) ?? "wizard";
+  const source: ProjectSource = { kind };
+  if (typeof value.description === "string") source.description = value.description;
+  // Only keep an image that still looks like a data URL; a half-written one
+  // would render as a broken image on every card in the library.
+  if (typeof value.imagePreview === "string" && value.imagePreview.startsWith("data:")) {
+    source.imagePreview = value.imagePreview;
+  }
+  return source;
+}
+
+
+/**
+ * A stored pattern is optional on a project, so a malformed one is DROPPED
+ * rather than repaired: a project that loads without its written pattern is
+ * recoverable, while a half-parsed pattern renders as a page of blanks and
+ * looks like data loss.
+ *
+ * Nested prose is accepted permissively — the worst a stray string can do is
+ * read oddly — but anything the UI iterates or does arithmetic on is checked.
+ */
+/** Finite number or the fallback. Guards every value the UI formats or sums. */
+function num(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function parseEach<T>(value: unknown, parse: (raw: Record<string, unknown>) => T | null): T[] {
+  if (!Array.isArray(value)) return [];
+  const out: T[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw)) continue;
+    const parsed = parse(raw);
+    if (parsed) out.push(parsed);
+  }
+  return out;
+}
+
+/** Quantities are what the shopping list adds up, so they are coerced to numbers. */
+function parseYarnRequirement(raw: Record<string, unknown>): YarnRequirement | null {
+  const yarn = parseYarnSpec(raw.yarn);
+  if (!yarn) return null;
+  return {
+    yarn,
+    role: str(raw.role, "MC"),
+    ...(typeof raw.hex === "string" ? { hex: raw.hex } : {}),
+    metres: num(raw.metres, 0),
+    balls: num(raw.balls, 0),
+  };
+}
+
+function parseNeedleSpec(raw: Record<string, unknown>): NeedleSpec | null {
+  const mm = num(raw.mm, 0);
+  // A needle with no size tells the knitter nothing.
+  if (mm <= 0) return null;
+  const kind = oneOf(raw.kind, ["straight", "circular", "dpn", "hook"] as const);
+  return {
+    kind: kind ?? "straight",
+    mm,
+    ...(typeof raw.lengthCm === "number" ? { lengthCm: raw.lengthCm } : {}),
+    use: str(raw.use),
+  };
+}
+
+function parseFlossRequirement(raw: Record<string, unknown>): FlossRequirement | null {
+  const floss = parseFlossColor(raw.floss);
+  if (!floss) return null;
+  return {
+    floss,
+    stitches: num(raw.stitches, 0),
+    skeins: num(raw.skeins, 0),
+  };
+}
+
+/**
+ * A yarn with no ball size cannot be turned into a number of balls, which is
+ * the only thing the shopping list needs it for.
+ */
+function parseYarnSpec(value: unknown): YarnSpec | null {
+  if (!isRecord(value)) return null;
+  const metresPerBall = num(value.metresPerBall, 0);
+  const gramsPerBall = num(value.gramsPerBall, 0);
+  if (metresPerBall <= 0 || gramsPerBall <= 0) return null;
+  const cyc = num(value.cyc, 4);
+  return {
+    ...(typeof value.name === "string" ? { name: value.name } : {}),
+    ...(typeof value.brand === "string" ? { brand: value.brand } : {}),
+    cyc: (cyc >= 0 && cyc <= 7 ? cyc : 4) as YarnSpec["cyc"],
+    metresPerBall,
+    gramsPerBall,
+    ...(Array.isArray(value.fibre)
+      ? { fibre: value.fibre.filter((f): f is string => typeof f === "string") }
+      : {}),
+    ...(typeof value.wpi === "number" ? { wpi: value.wpi } : {}),
+  };
+}
+
+/** A floss shade is identified by its code; without one it cannot be bought. */
+function parseFlossColor(value: unknown): FlossColor | null {
+  if (!isRecord(value)) return null;
+  const code = str(value.code);
+  if (!code) return null;
+  return {
+    code,
+    brand: oneOf(value.brand, ["DMC", "Anchor", "Madeira", "Other"] as const) ?? "Other",
+    name: str(value.name, code),
+    hex: /^#[0-9a-fA-F]{6}$/.test(str(value.hex)) ? str(value.hex) : "#cccccc",
+    symbol: str(value.symbol, "?"),
+  };
+}
+
+/** Finished measurements are a flat name -> centimetres map; drop anything else. */
+function parseMeasurements(value: unknown): FinishedMeasurements {
+  if (!isRecord(value)) return {};
+  const out: FinishedMeasurements = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (typeof raw === "number" && Number.isFinite(raw)) out[key] = raw;
+  }
+  return out;
+}
+
+/**
+ * Materials drive the shopping list, so the arrays must exist even when the
+ * stored value is nonsense — a missing needle list should render as "none
+ * recorded", never crash a `.map`.
+ */
+function parseMaterials(value: unknown): Materials {
+  const record = isRecord(value) ? value : {};
+  const materials: Materials = {
+    yarns: parseEach(record.yarns, parseYarnRequirement),
+    needles: parseEach(record.needles, parseNeedleSpec),
+    notions: Array.isArray(record.notions)
+      ? record.notions.filter((n): n is string => typeof n === "string")
+      : [],
+  };
+  if (Array.isArray(record.floss)) {
+    materials.floss = parseEach(record.floss, parseFlossRequirement);
+  }
+  if (isRecord(record.fabric)) {
+    const fabric = record.fabric;
+    // Cut sizes are printed and rounded, so they must be real numbers.
+    materials.fabric = {
+      fabric: fabric.fabric as FabricRequirement["fabric"],
+      cutWidthCm: num(fabric.cutWidthCm, 0),
+      cutHeightCm: num(fabric.cutHeightCm, 0),
+    };
+  }
+  return materials;
+}
+
+/** An abbreviation with no abbr or no meaning teaches nothing, so it is dropped. */
+function parseAbbreviations(value: unknown): Abbreviation[] {
+  if (!Array.isArray(value)) return [];
+  const out: Abbreviation[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw)) continue;
+    const abbr = str(raw.abbr);
+    const meaning = str(raw.meaning);
+    if (!abbr || !meaning) continue;
+    out.push({ abbr, meaning, videoKeywords: str(raw.videoKeywords) });
+  }
+  return out;
+}
+
+function parsePattern(value: unknown, fallbackCraft: CraftType): Pattern | null {
+  if (!isRecord(value)) return null;
+
+  const name = str(value.name);
+  if (!name) return null;
+
+  const garmentType = isGarmentType(str(value.garmentType)) ? (value.garmentType as GarmentType) : null;
+  const size = toGarmentSize(str(value.size));
+  if (!garmentType || !size) return null;
+
+  const gauge = isRecord(value.gauge) ? value.gauge : null;
+  const stitchesPer10cm = gauge ? int(gauge.stitchesPer10cm, 0) : 0;
+  const rowsPer10cm = gauge ? int(gauge.rowsPer10cm, 0) : 0;
+  // A zero gauge divides by zero everywhere downstream.
+  if (stitchesPer10cm <= 0 || rowsPer10cm <= 0) return null;
+
+  const sections: PatternSection[] = [];
+  if (Array.isArray(value.sections)) {
+    for (const raw of value.sections) {
+      if (!isRecord(raw)) continue;
+      const sectionName = str(raw.name);
+      if (!sectionName) continue;
+      const instructions: Instruction[] = [];
+      if (Array.isArray(raw.instructions)) {
+        for (const inst of raw.instructions) {
+          if (!isRecord(inst)) continue;
+          const text = str(inst.text);
+          if (!text) continue;
+          instructions.push({
+            ...(inst as Record<string, unknown>),
+            text,
+          } as Instruction);
+        }
+      }
+      sections.push({
+        name: sectionName,
+        description: str(raw.description),
+        instructions,
+        ...(typeof raw.chartId === "string" ? { chartId: raw.chartId } : {}),
+      });
+    }
+  }
+
+  return {
+    id: str(value.id) || `pattern-${name}`,
+    name,
+    craftType: isCraftType(value.craftType) ? value.craftType : fallbackCraft,
+    garmentType,
+    size,
+    difficulty: parseDifficulty(value.difficulty),
+    gauge: { ...(gauge as object), stitchesPer10cm, rowsPer10cm } as Gauge,
+    measurements: parseMeasurements(value.measurements),
+    materials: parseMaterials(value.materials),
+    abbreviations: parseAbbreviations(value.abbreviations),
+    sections,
+    notes: str(value.notes),
+    estimatedTime: str(value.estimatedTime),
+    source: oneOf(value.source, PATTERN_SOURCES) ?? "wizard",
+    ...(typeof value.sourceDescription === "string"
+      ? { sourceDescription: value.sourceDescription }
+      : {}),
+    createdAt: str(value.createdAt, new Date(0).toISOString()),
+    updatedAt: str(value.updatedAt, new Date(0).toISOString()),
+  };
+}
+
 export function parseProject(value: unknown): Project | null {
   if (!isRecord(value)) return null;
   if (value.schemaVersion !== PROJECT_SCHEMA_VERSION) return null;
@@ -233,14 +545,14 @@ export function parseProject(value: unknown): Project | null {
     garmentType,
     size,
     difficulty: parseDifficulty(value.difficulty),
-    source: isRecord(value.source) ? (value.source as Project["source"]) : { kind: "wizard" as const },
+    source: parseSource(value.source),
     notes: str(value.notes),
     archived: bool(value.archived),
     createdAt: str(value.createdAt, now),
     updatedAt: str(value.updatedAt, now),
   };
 
-  const pattern = isRecord(value.pattern) ? (value.pattern as Project["pattern"]) : null;
+  const pattern = parsePattern(value.pattern, craftType);
   const progress = parseProgress(value.progress, charts);
   const settings = value.settings as Record<string, unknown>;
 

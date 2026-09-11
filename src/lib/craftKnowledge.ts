@@ -1,5 +1,12 @@
-import type { CraftType, GarmentTemplate, QuickReferenceGroup } from "@/types";
-import { stitchDisplayImage } from "@/lib/stitchImages";
+/**
+ * LEGACY CONTENT SOURCE.
+ *
+ * Kept for its 31 STITCH_LIBRARY entries, which are the raw teaching content
+ * the rebuilt Learn section is being written from. The garment-template and
+ * quick-reference helpers that used to live here were removed with the old data
+ * model; sizing now comes from src/lib/knit and diagrams from src/lib/diagrams.
+ */
+import type { CraftType } from "@/types";
 
 export type GarmentSize = "XS" | "S" | "M" | "L" | "XL" | "2XL";
 
@@ -829,67 +836,7 @@ export function estimateSkeins(garmentType: string | undefined, size: string | u
   return Math.max(1, Math.ceil((meterage * craftFactor) / 220));
 }
 
-export function buildGaugeTemplate(craftType: CraftType): Record<string, GarmentTemplate> {
-  const gauge = gaugeForCraft(craftType);
-  const sts = gauge.stitchesPerInch;
-  const rows = gauge.rowsPerInch;
-  // Use Large (42") as the template size - 76 sts back for knitting
-  const bySize = SIZE_PROFILES.L;
-  const backW = Math.round((bySize.bust / 2) * sts);
-  const bodyH = Math.round(bySize.length * rows);
-  const frontW = Math.round((bySize.bust / 4 + 1.5) * sts);
-  const sleeveW = Math.round((bySize.bust * 0.32) * sts);
-  const sleeveH = Math.round(bySize.sleeve * rows);
-  const vestH = Math.round((bySize.length - 1.5) * rows);
-  const gloveW = Math.round(7 * sts);
-  const gloveH = Math.round(7.5 * rows);
-
-  return {
-    Sweater: { sections: [{ name: "Back", w: backW, h: bodyH }, { name: "Front", w: backW, h: bodyH }, { name: "Neckband", w: Math.round(backW * 0.72), h: Math.round(rows * 2.5) }, { name: "Left Sleeve", w: sleeveW, h: sleeveH }, { name: "Right Sleeve", w: sleeveW, h: sleeveH }] },
-    Cardigan: { sections: [{ name: "Back", w: backW, h: bodyH }, { name: "Front Right", w: frontW, h: bodyH }, { name: "Front Left", w: frontW, h: bodyH }, { name: "Button Band", w: Math.max(8, Math.round(sts * 2)), h: bodyH }, { name: "Neckband", w: Math.round(backW * 0.76), h: Math.round(rows * 2.5) }, { name: "Left Sleeve", w: sleeveW, h: sleeveH }, { name: "Right Sleeve", w: sleeveW, h: sleeveH }, { name: "Pocket", w: Math.round(sts * 5), h: Math.round(rows * 4) }] },
-    Vest: { sections: [{ name: "Back", w: backW, h: vestH }, { name: "Front", w: backW, h: vestH }, { name: "Neckband", w: Math.round(backW * 0.72), h: Math.round(rows * 2) }, { name: "Armhole Bands", w: Math.round(backW * 0.44), h: Math.round(rows * 2) }] },
-    "Tank Top": { sections: [{ name: "Back", w: backW, h: vestH }, { name: "Front", w: backW, h: vestH }, { name: "Neckband", w: Math.round(backW * 0.62), h: Math.round(rows * 1.8) }, { name: "Armhole Bands", w: Math.round(backW * 0.38), h: Math.round(rows * 1.8) }] },
-    Hat: { sections: [{ name: "Hat Body", w: Math.round(20 * sts), h: Math.round(8 * rows) }, { name: "Brim", w: Math.round(20 * sts), h: Math.round(2.5 * rows) }] },
-    Scarf: { sections: [{ name: "Scarf", w: Math.round(8 * sts), h: Math.round(55 * rows) }] },
-    Cowl: { sections: [{ name: "Cowl Body", w: Math.round(24 * sts), h: Math.round(12 * rows) }] },
-    Socks: { sections: [{ name: "Leg", w: Math.round(8 * sts), h: Math.round(7 * rows) }, { name: "Heel Flap", w: Math.round(4 * sts), h: Math.round(3 * rows) }, { name: "Foot", w: Math.round(8 * sts), h: Math.round(8 * rows) }, { name: "Toe", w: Math.round(8 * sts), h: Math.round(2.5 * rows) }] },
-    Mittens: { sections: [{ name: "Hand", w: Math.round(7 * sts), h: Math.round(8 * rows) }, { name: "Thumb", w: Math.round(3 * sts), h: Math.round(3.5 * rows) }, { name: "Cuff", w: Math.round(7 * sts), h: Math.round(2.5 * rows) }] },
-    Gloves: { sections: [{ name: "Hand", w: gloveW, h: gloveH }, { name: "Fingers", w: gloveW, h: Math.round(2.7 * rows) }, { name: "Thumb", w: Math.round(3 * sts), h: Math.round(3.5 * rows) }, { name: "Cuff", w: gloveW, h: Math.round(2.5 * rows) }] },
-    Shawl: { sections: [{ name: "Shawl Body", w: Math.round(32 * sts), h: Math.round(16 * rows) }] },
-    "Baby Blanket": { sections: [{ name: "Blanket", w: Math.round(30 * sts), h: Math.round(34 * rows) }] },
-    "Throw Blanket": { sections: [{ name: "Blanket", w: Math.round(42 * sts), h: Math.round(54 * rows) }] },
-    "Tote Bag": { sections: [{ name: "Front", w: Math.round(13 * sts), h: Math.round(15 * rows) }, { name: "Back", w: Math.round(13 * sts), h: Math.round(15 * rows) }, { name: "Base", w: Math.round(13 * sts), h: Math.round(4 * rows) }, { name: "Straps", w: Math.round(2 * sts), h: Math.round(18 * rows) }] },
-    Dishcloth: { sections: [{ name: "Cloth", w: Math.round(9 * sts), h: Math.round(9 * rows) }] },
-    Headband: { sections: [{ name: "Headband", w: Math.round(20 * sts), h: Math.round(3.5 * rows) }] },
-    "Leg Warmers": { sections: [{ name: "Left Leg Warmer", w: Math.round(12 * sts), h: Math.round(16 * rows) }, { name: "Right Leg Warmer", w: Math.round(12 * sts), h: Math.round(16 * rows) }, { name: "Cuffs", w: Math.round(12 * sts), h: Math.round(2.5 * rows) }] },
-  };
-}
 
 export function getStitchGraph(craftType: CraftType) {
   return STITCH_LIBRARY.filter((entry) => entry.craftType === craftType);
-}
-
-function lessonImage(craftType: CraftType, id: string): string | undefined {
-  const entry = getStitchGraph(craftType).find((item) => item.id === id);
-  return entry ? stitchDisplayImage(entry) : undefined;
-}
-
-export function getRibbingReference(craftType: CraftType): QuickReferenceGroup {
-  return craftType === "crocheting"
-    ? {
-        title: "Crochet ribbing",
-        items: [
-          { title: "Back-loop sc rib (most common)", detail: "Work single crochet through the back loop only, turning each row. Work sideways to the needed length, then join the short edges to cuffs, hems, collars, or bands with a slip-stitch seam.", imageUrl: lessonImage("crocheting", "crochet-ribbing"), sourceUrl: "/learn#learn-crochet-ribbing" },
-          { title: "Front/back-post rib", detail: "Alternate FPdc and BPdc for a raised, stretchy post-stitch rib. Great for cuffs and collars - the posts grip the fabric and prevent flaring.", imageUrl: lessonImage("crocheting", "double-crochet"), sourceUrl: "/learn#learn-crochet-ribbing" },
-          { title: "How ribbing fits in", detail: "For a cardigan: work the rib band separately and join it to the hem and cuffs. The rib height is typically 2-3 inches (5-7.5 cm).", sourceUrl: "/learn#learn-crochet-ribbing" },
-        ],
-      }
-    : {
-        title: "Knitted ribbing",
-        items: [
-          { title: "1x1 rib - *k1, p1*", detail: "Alternate one knit and one purl stitch across. On subsequent rows, knit the knits and purl the purls as they face you. Elastic and tidy - perfect for all edges.", imageUrl: lessonImage("knitting", "ribbing"), sourceUrl: "/learn#learn-ribbing" },
-          { title: "2x2 rib - *k2, p2*", detail: "Bolder, stretchier columns. Keep the knit columns directly above the knit columns from the previous row. Most common for cuffs and hems on chunky garments.", imageUrl: lessonImage("knitting", "ribbing"), sourceUrl: "/learn#learn-ribbing" },
-          { title: "How ribbing fits in", detail: "For a cardigan: cast on the hem, work 1-2 inches of ribbing, then switch to stockinette. For cuffs: cast on fewer stitches in rib, then increase when you switch to the sleeve body.", sourceUrl: "/learn#learn-ribbing" },
-        ],
-      };
 }
