@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { chartGeometry } from "@/lib/project/geometry";
@@ -21,9 +21,18 @@ import ChartLegend from "@/components/chart/ChartLegend";
 import VoiceCounter from "@/components/VoiceCounter";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Panel } from "@/components/ui/Panel";
-import { EmptyState, Heading, Tag } from "@/components/ui/Bits";
+import { EmptyState, Heading, Loading, Meter, Stat, Tag } from "@/components/ui/Bits";
 import { chartToInstructions } from "@/lib/chart";
 import { isCrossStitchChart, type SavedChart } from "@/types";
+import { cn } from "@/lib/cn";
+
+/** Cell sizes the zoom control steps through, in px. */
+const ZOOMS = [
+  { value: 0, label: "Fit" },
+  { value: 16, label: "S" },
+  { value: 24, label: "M" },
+  { value: 36, label: "L" },
+] as const;
 
 export default function TrackerPage(props: { params: Promise<{ id: string }> }) {
   const { id } = use(props.params);
@@ -44,6 +53,10 @@ export default function TrackerPage(props: { params: Promise<{ id: string }> }) 
   const geometry = useMemo(() => (saved ? chartGeometry(saved.chart) : null), [saved]);
   const progress = saved && project ? project.progress.charts[saved.id] : undefined;
 
+  // Zoom lives with the reader, not with the project: how close you hold the
+  // phone is not a property of the pattern.
+  const [zoom, setZoom] = useState<number>(0);
+
   const apply = useCallback(
     (change: Parameters<typeof store.mutateChartProgress>[2]) => {
       if (!project || !saved) return;
@@ -53,7 +66,11 @@ export default function TrackerPage(props: { params: Promise<{ id: string }> }) 
   );
 
   if (!store.loaded) {
-    return <p className="label mx-auto max-w-6xl px-4 py-12 text-ink-faint">Loading…</p>;
+    return (
+      <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
+        <Loading>Opening your project</Loading>
+      </div>
+    );
   }
 
   if (!project || !saved || !geometry || !progress) {
@@ -79,79 +96,134 @@ export default function TrackerPage(props: { params: Promise<{ id: string }> }) 
     ? chartToInstructions(yarnChart).rows.find((r) => r.rowNumber === view.rowNumber)?.text
     : undefined;
 
+  const percent = Math.round(view.fraction * 100);
+
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
       <Heading
         eyebrow={project.name}
         title={saved.name}
-        description={`${saved.piece} · row ${view.rowNumber} of ${view.totalRows}${
-          view.side ? ` (${view.side})` : ""
-        }`}
-        action={<ButtonLink href="/saved" variant="secondary">Library</ButtonLink>}
+        description={`${saved.piece} · ${view.totalRows} rows · ${percent}% worked`}
+        action={
+          <ButtonLink href="/saved" variant="secondary">
+            Library
+          </ButtonLink>
+        }
       />
 
       {project.charts.length > 1 && (
-        <nav className="mt-6 flex flex-wrap gap-2" aria-label="Pieces">
-          {project.charts.map((chart) => (
-            <ButtonLink
-              key={chart.id}
-              href={`/chart/${project.id}?chart=${chart.id}`}
-              size="sm"
-              variant={chart.id === saved.id ? "primary" : "secondary"}
-            >
-              {chart.piece}
-            </ButtonLink>
-          ))}
+        <nav className="mt-7" aria-label="Pieces">
+          <p className="label mb-2.5 text-ink-faint">Pieces in this project</p>
+          <ul className="flex flex-wrap gap-2">
+            {project.charts.map((piece) => {
+              const active = piece.id === saved.id;
+              return (
+                <li key={piece.id}>
+                  <ButtonLink
+                    href={`/chart/${project.id}?chart=${piece.id}`}
+                    size="sm"
+                    variant={active ? "primary" : "secondary"}
+                    aria-current={active ? "true" : undefined}
+                  >
+                    {active && <span className="h-2 w-2 bg-panel" aria-hidden />}
+                    {piece.piece}
+                  </ButtonLink>
+                </li>
+              );
+            })}
+          </ul>
         </nav>
       )}
 
-      <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <div className="space-y-6">
+      <div className="mt-7 grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_23rem]">
+        <div className="space-y-5">
+          <NowPanel
+            rowNumber={view.rowNumber}
+            totalRows={view.totalRows}
+            side={view.side}
+            stitchesDone={view.stitchesDone}
+            stitchesInRow={view.stitchesInRow}
+            remaining={view.remaining}
+            rowComplete={view.rowComplete}
+            chartComplete={view.chartComplete}
+            instruction={instruction}
+            undoText={undoLabel(progress)}
+            onIncrement={(by) => apply((p) => increment(geometry, p, by))}
+            onDecrement={(by) => apply((p) => decrement(geometry, p, by))}
+            onNextRow={() => apply((p) => gotoRow(geometry, p, view.rowNumber + 1))}
+            onPrevRow={() => apply((p) => gotoRow(geometry, p, view.rowNumber - 1))}
+            onResetRow={() => apply((p) => setCount(geometry, p, 0))}
+            onUndo={() => apply((p) => undo(p))}
+          />
+
           <Panel
             title="Chart"
             accent="cobalt"
+            bodyClassName="p-3 sm:p-4"
             action={
-              <Tag tone={view.chartComplete ? "fern" : "neutral"}>
-                {view.chartComplete ? "Finished" : `${Math.round(view.fraction * 100)}%`}
-              </Tag>
+              <div className="flex items-center gap-2">
+                <span className="label text-panel">Zoom</span>
+                <div className="flex" role="group" aria-label="Chart zoom">
+                  {ZOOMS.map((z) => (
+                    <button
+                      key={z.value}
+                      type="button"
+                      aria-pressed={zoom === z.value}
+                      onClick={() => setZoom(z.value)}
+                      className={cn(
+                        "label h-9 w-11 border-[3px] border-ink",
+                        zoom === z.value
+                          ? "bg-ink text-panel"
+                          : "bg-panel text-ink hover:bg-gold"
+                      )}
+                    >
+                      {z.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             }
           >
-            <div className="overflow-x-auto">
+            <ChartBoard
+              zoom={zoom}
+              activeRow={view.rowNumber}
+              totalRows={view.totalRows}
+            >
               {stitchChart ? (
-                <CrossStitchView chart={stitchChart} cellSize={16} />
+                <CrossStitchView chart={stitchChart} cellSize={zoom || 16} />
               ) : yarnChart ? (
                 <ChartView
                   chart={yarnChart}
-                  cellSize={20}
+                  cellSize={zoom || 20}
                   activeRow={view.rowNumber}
                   onCellClick={(row) =>
                     apply((p) => gotoRow(geometry, p, geometry.rows[row]?.rowNumber ?? 1))
                   }
                 />
               ) : null}
-            </div>
+            </ChartBoard>
+            <p className="mt-3 text-tiny text-ink-faint">
+              Row 1 is at the bottom, as on chart paper. Tap any row to jump to
+              it.
+            </p>
           </Panel>
 
-          {instruction && (
-            <Panel title="This row" accent="gold">
-              <p className="text-base text-ink">{instruction}</p>
-            </Panel>
-          )}
-
           {yarnChart && (
-            <Panel title="Stitch key" accent="grape">
+            <Panel title="What the symbols mean" accent="grape">
               <ChartLegend chart={yarnChart} />
             </Panel>
           )}
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-5">
           <VoiceCounter
             rowNumber={view.rowNumber}
             totalRows={view.totalRows}
             stitchesDone={view.stitchesDone}
             stitchesInRow={view.stitchesInRow}
             instruction={instruction}
+            chart={yarnChart ?? undefined}
+            rowIndex={view.rowIndex}
             onIncrement={(by) => apply((p) => increment(geometry, p, by))}
             onDecrement={(by) => apply((p) => decrement(geometry, p, by))}
             onNextRow={() => apply((p) => gotoRow(geometry, p, view.rowNumber + 1))}
@@ -162,34 +234,22 @@ export default function TrackerPage(props: { params: Promise<{ id: string }> }) 
             onUndo={() => apply((p) => undo(p))}
           />
 
-          <Panel title="Rows" accent="fern">
-            <UndoLine progress={progress} onUndo={() => apply((p) => undo(p))} />
-            <ol className="mt-3 max-h-96 space-y-1.5 overflow-y-auto pr-1">
-              {[...geometry.rows].reverse().map((row) => {
-                const done = stitchesDoneInRow(progress, row.rowIndex) >= row.count;
-                return (
-                  <li key={row.rowIndex}>
-                    <button
-                      type="button"
-                      onClick={() => apply((p) => toggleRow(geometry, p, row.rowIndex))}
-                      className={`flex w-full items-center justify-between gap-3 border-[3px] border-ink px-3 py-2 text-left ${
-                        row.rowNumber === view.rowNumber
-                          ? "bg-gold"
-                          : done
-                            ? "bg-panel-sunk text-ink-faint"
-                            : "bg-panel"
-                      }`}
-                    >
-                      <span className="label">
-                        Row {row.rowNumber}
-                        {row.side ? ` (${row.side})` : ""}
-                      </span>
-                      <span className="label text-ink-faint">{row.count} sts</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
+          <Panel
+            title="Rows"
+            accent="fern"
+            bodyClassName="p-3 sm:p-4"
+            action={
+              <Tag tone={view.chartComplete ? "gold" : "neutral"}>
+                {view.chartComplete ? "All worked" : `${percent}% worked`}
+              </Tag>
+            }
+          >
+            <RowList
+              rows={geometry.rows}
+              progress={progress}
+              currentRow={view.rowNumber}
+              onToggle={(rowIndex) => apply((p) => toggleRow(geometry, p, rowIndex))}
+            />
           </Panel>
         </div>
       </div>
@@ -197,30 +257,258 @@ export default function TrackerPage(props: { params: Promise<{ id: string }> }) 
   );
 }
 
-function UndoLine({
-  progress,
+/* -------------------------------------------------------------------------- */
+/* The row being worked — the one thing on this page that must be readable    */
+/* from where the knitting is.                                                 */
+/* -------------------------------------------------------------------------- */
+
+function NowPanel({
+  rowNumber,
+  totalRows,
+  side,
+  stitchesDone,
+  stitchesInRow,
+  remaining,
+  rowComplete,
+  chartComplete,
+  instruction,
+  undoText,
+  onIncrement,
+  onDecrement,
+  onNextRow,
+  onPrevRow,
+  onResetRow,
   onUndo,
 }: {
-  progress: Parameters<typeof undoLabel>[0];
+  rowNumber: number;
+  totalRows: number;
+  side: "RS" | "WS" | null;
+  stitchesDone: number;
+  stitchesInRow: number;
+  remaining: number;
+  rowComplete: boolean;
+  chartComplete: boolean;
+  instruction?: string;
+  undoText: string | null;
+  onIncrement: (by: number) => void;
+  onDecrement: (by: number) => void;
+  onNextRow: () => void;
+  onPrevRow: () => void;
+  onResetRow: () => void;
   onUndo: () => void;
 }) {
-  const label = undoLabel(progress);
-  const [flash, setFlash] = useState(false);
-  if (!label) return <p className="text-tiny text-ink-faint">Nothing to undo yet.</p>;
   return (
-    <div className="flex items-center justify-between gap-3">
-      <p className="text-tiny text-ink-soft">Last: {label}</p>
-      <Button
-        size="sm"
-        variant={flash ? "gold" : "quiet"}
-        onClick={() => {
-          onUndo();
-          setFlash(true);
-        }}
-        onBlur={() => setFlash(false)}
-      >
-        Undo
-      </Button>
+    <Panel
+      title={chartComplete ? "Finished" : rowComplete ? "Row complete" : "Working now"}
+      accent={chartComplete ? "fern" : rowComplete ? "fern" : "gold"}
+      action={
+        side && (
+          <Tag tone="neutral">
+            {side === "RS" ? "Right side facing" : "Wrong side facing"}
+          </Tag>
+        )
+      }
+    >
+      {/* One spoken summary for screen readers, updated as the count changes.
+          The visible numbers below are the same fact; announcing each button
+          separately would be unbearable mid-row. */}
+      <p aria-live="polite" className="sr-only">
+        Row {rowNumber} of {totalRows}. {stitchesDone} of {stitchesInRow}{" "}
+        stitches worked, {remaining} to go.
+      </p>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Stat
+          label="Row"
+          value={rowNumber}
+          sub={`of ${totalRows}`}
+          tone={rowComplete ? "fern" : "gold"}
+        />
+        <Stat
+          label="Stitches this row"
+          value={stitchesDone}
+          sub={remaining > 0 ? `${remaining} still to work` : "Row finished"}
+        />
+      </div>
+
+      <Meter
+        className="mt-4"
+        value={stitchesDone}
+        max={stitchesInRow}
+        tone={rowComplete ? "fern" : "gold"}
+        label="This row"
+        valueText={`${stitchesDone} of ${stitchesInRow} stitches`}
+      />
+
+      {instruction && (
+        <div className="panel-sunk mt-4 p-4">
+          <p className="label mb-2 text-ink-soft">Read this row</p>
+          <p className="text-base leading-relaxed text-ink sm:text-lg">
+            {instruction}
+          </p>
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
+        <Button
+          size="lg"
+          variant="gold"
+          onClick={() => onIncrement(1)}
+          disabled={rowComplete}
+          className="sm:col-span-2"
+        >
+          {rowComplete ? "Row complete" : "Count one stitch"}
+        </Button>
+        <Button size="md" variant="primary" onClick={onNextRow}>
+          Next row
+        </Button>
+        <Button size="md" variant="secondary" onClick={onPrevRow}>
+          Previous row
+        </Button>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-2.5">
+        <Button size="md" variant="quiet" onClick={() => onDecrement(1)}>
+          Back one
+        </Button>
+        <Button size="md" variant="quiet" onClick={onResetRow}>
+          Reset row
+        </Button>
+        <Button size="md" variant="quiet" onClick={onUndo} disabled={!undoText}>
+          Undo
+        </Button>
+      </div>
+
+      <p className="mt-3 text-tiny text-ink-faint">
+        {undoText ? `Undo will reverse: ${undoText}.` : "Nothing to undo yet."}
+      </p>
+    </Panel>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* The chart board                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Wraps the chart SVG.
+ *
+ * `Fit` shows the whole piece scaled to the column; any zoom level renders at
+ * true cell size inside a scroll box and keeps the row being worked in view.
+ * Scrolling is done in an effect rather than during render, and it only moves
+ * the scroll position — no state is set, so the React Compiler rules hold.
+ */
+function ChartBoard({
+  zoom,
+  activeRow,
+  totalRows,
+  children,
+}: {
+  zoom: number;
+  activeRow: number;
+  totalRows: number;
+  children: React.ReactNode;
+}) {
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box || zoom === 0) return;
+    // Row 1 sits at the BOTTOM of the drawing, so the row being worked is
+    // (totalRows - activeRow) rows down from the top.
+    const fromTop = (totalRows - activeRow) * zoom;
+    box.scrollTo({
+      top: Math.max(0, fromTop - box.clientHeight / 2 + zoom / 2),
+      behavior: "smooth",
+    });
+  }, [zoom, activeRow, totalRows]);
+
+  if (zoom === 0) return <div className="chart-fit">{children}</div>;
+
+  return (
+    <div
+      ref={boxRef}
+      className="chart-board max-h-[65vh]"
+      tabIndex={0}
+      role="region"
+      aria-label="Chart, scrollable"
+    >
+      {children}
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* The row list                                                                */
+/* -------------------------------------------------------------------------- */
+
+function RowList({
+  rows,
+  progress,
+  currentRow,
+  onToggle,
+}: {
+  rows: ReturnType<typeof chartGeometry>["rows"];
+  progress: Parameters<typeof stitchesDoneInRow>[0];
+  currentRow: number;
+  onToggle: (rowIndex: number) => void;
+}) {
+  const listRef = useRef<HTMLOListElement>(null);
+
+  useEffect(() => {
+    const current = listRef.current?.querySelector<HTMLElement>("[data-current='true']");
+    current?.scrollIntoView({ block: "center" });
+  }, [currentRow]);
+
+  return (
+    <ol
+      ref={listRef}
+      className="max-h-[26rem] space-y-2 overflow-y-auto p-1"
+      aria-label="Every row in this chart"
+    >
+      {/* Top of the list is the top of the chart: the last row worked. */}
+      {[...rows].reverse().map((row) => {
+        const done = stitchesDoneInRow(progress, row.rowIndex) >= row.count;
+        const current = row.rowNumber === currentRow;
+        return (
+          <li key={row.rowIndex}>
+            <button
+              type="button"
+              data-current={current ? "true" : undefined}
+              aria-current={current ? "true" : undefined}
+              onClick={() => onToggle(row.rowIndex)}
+              className={cn(
+                "hit flex w-full items-center gap-3 border-[3px] border-ink px-3 py-2 text-left",
+                current
+                  ? "bg-gold shadow-pop-sm"
+                  : done
+                    ? "stripe bg-panel-sunk text-ink-soft"
+                    : "bg-panel hover:bg-panel-sunk"
+              )}
+            >
+              {/* Worked / not worked is a shape as well as a shade. */}
+              <span
+                className={cn(
+                  "flex h-5 w-5 shrink-0 items-center justify-center border-[3px] border-ink",
+                  done ? "bg-fern" : "bg-panel"
+                )}
+                aria-hidden
+              >
+                {done && <span className="h-1.5 w-1.5 bg-panel" />}
+              </span>
+              <span className="label min-w-0 flex-1">
+                Row {row.rowNumber}
+                {row.side ? ` · ${row.side}` : ""}
+              </span>
+              <span className="label shrink-0 text-ink-faint">{row.count} sts</span>
+              <span className="sr-only">
+                {done ? "worked" : "not worked yet"}
+                {current ? ", current row" : ""}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
