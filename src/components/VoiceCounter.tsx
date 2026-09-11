@@ -6,6 +6,8 @@ import { useSpeaker } from "@/hooks/useSpeaker";
 import { useWakeLock } from "@/hooks/useWakeLock";
 import type { VoiceCommand } from "@/lib/voice/parseCommand";
 import { describeSequence } from "@/lib/voice/stitchWords";
+import { checkSequence } from "@/lib/voice/checkSequence";
+import type { SymbolChart } from "@/lib/chart";
 import { Button } from "@/components/ui/Button";
 import { Meter, Tag } from "@/components/ui/Bits";
 import { cn } from "@/lib/cn";
@@ -17,6 +19,15 @@ export interface VoiceCounterProps {
   stitchesInRow: number;
   /** The written instruction for the current row, read aloud on request. */
   instruction?: string;
+  /**
+   * The chart being worked. When supplied, spoken stitches are checked
+   * against it — say "knit, purl, knit" and a wrong stitch is called out at
+   * the moment it happens rather than rows later. Optional: without it the
+   * counter still counts, it just cannot check.
+   */
+  chart?: SymbolChart;
+  /** 0-based index of the row being worked, needed alongside `chart`. */
+  rowIndex?: number;
   onIncrement: (by: number) => void;
   onDecrement: (by: number) => void;
   onNextRow: () => void;
@@ -56,6 +67,8 @@ export default function VoiceCounter({
   stitchesDone,
   stitchesInRow,
   instruction,
+  chart,
+  rowIndex,
   onIncrement,
   onDecrement,
   onNextRow,
@@ -69,6 +82,7 @@ export default function VoiceCounter({
   const speaker = useSpeaker();
   const [spoken, setSpoken] = useState(true);
   const [lastHeard, setLastHeard] = useState<string | null>(null);
+  const [mistake, setMistake] = useState<string | null>(null);
 
   const say = useCallback(
     (text: string) => {
@@ -85,10 +99,23 @@ export default function VoiceCounter({
         case "sequence": {
           // Each named stitch marks one square, in the order spoken.
           const n = command.calls.length;
+
+          // Check against the chart BEFORE advancing, so the comparison starts
+          // from where the knitter actually was.
+          if (chart && rowIndex !== undefined) {
+            const check = checkSequence(chart, rowIndex, stitchesDone, command.calls);
+            if (check.checked && !check.ok && check.message) {
+              setMistake(check.message);
+              say(check.message);
+            } else if (check.ok) {
+              setMistake(null);
+            }
+          }
+
           onIncrement(n);
           const next = stitchesDone + n;
           if (next >= stitchesInRow) say(`Row ${rowNumber} complete.`);
-          else say(String(next));
+          else if (!mistake) say(String(next));
           break;
         }
         case "increment": {
@@ -153,6 +180,7 @@ export default function VoiceCounter({
       onIncrement, onDecrement, onNextRow, onPrevRow, onGotoRow, onSetCount,
       onResetRow, onUndo, say, speaker,
       rowNumber, totalRows, stitchesDone, stitchesInRow, instruction,
+      chart, rowIndex, mistake,
     ]
   );
 
@@ -240,6 +268,22 @@ export default function VoiceCounter({
           <Button variant="quiet" onClick={onUndo}>Undo</Button>
           <Button variant="secondary" onClick={onNextRow}>Next row</Button>
         </div>
+
+        {mistake && (
+          <p
+            className="border-[3px] border-ink bg-berry p-3 text-sm text-panel"
+            role="alert"
+          >
+            {mistake}{" "}
+            <button
+              type="button"
+              className="label underline underline-offset-2"
+              onClick={() => setMistake(null)}
+            >
+              Dismiss
+            </button>
+          </p>
+        )}
 
         <p aria-live="polite" className="text-tiny text-ink-soft">
           {voice.transcript
