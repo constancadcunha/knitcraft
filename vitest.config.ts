@@ -9,6 +9,6 @@ export default defineConfig({
   },
   test: {
     // Live API probes live in scripts/, not here — `npm test` stays offline.
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
   },
 });

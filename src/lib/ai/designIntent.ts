@@ -15,6 +15,39 @@ import { requestJson, type ChatMessage, type CallOutcome } from "@/lib/ai/client
 
 export type MotifKind = "colourwork" | "cable" | "lace" | "texture" | "plain";
 
+/**
+ * Construction must be a choice from a fixed set, not free text.
+ *
+ * Left open, models produce self-contradictory answers — an observed real
+ * response was "top-down raglan with set-in sleeves", which names two mutually
+ * exclusive constructions. The engine has to build an actual garment from this,
+ * so it has to be one of the shapes the engine knows how to build.
+ */
+export type Construction =
+  | "set-in-sleeve"
+  | "raglan"
+  | "drop-shoulder"
+  | "circular-yoke"
+  | "worked-flat"
+  | "in-the-round"
+  | "motifs-joined";
+
+const CONSTRUCTIONS: Construction[] = [
+  "set-in-sleeve", "raglan", "drop-shoulder", "circular-yoke",
+  "worked-flat", "in-the-round", "motifs-joined",
+];
+
+/** Map the phrases models actually emit onto the fixed set. */
+const CONSTRUCTION_ALIASES: Array<[RegExp, Construction]> = [
+  [/circular yoke|yoked|round yoke/i, "circular-yoke"],
+  [/raglan/i, "raglan"],
+  [/drop shoulder|dropped shoulder/i, "drop-shoulder"],
+  [/set[- ]in/i, "set-in-sleeve"],
+  [/granny|motif|square|hexagon|join[- ]as[- ]you[- ]go/i, "motifs-joined"],
+  [/in the round|worked in the round|seamless|circular/i, "in-the-round"],
+  [/flat|seamed|in pieces|panels/i, "worked-flat"],
+];
+
 export interface PaletteEntry {
   role: string;
   hex: string;
@@ -27,7 +60,9 @@ export interface DesignIntent {
   motifDescription: string;
   palette: PaletteEntry[];
   stitchPattern: string;
-  construction: string;
+  construction: Construction;
+  /** The model's own wording, kept for display; never parsed. */
+  constructionNotes: string;
   designerNotes: string;
 }
 
@@ -75,6 +110,14 @@ export function coerceDesignIntent(value: unknown): DesignIntent | null {
   const name = asString(value.name);
   if (!name) return null;
 
+  // Take the FIRST alias that matches, in priority order: "top-down raglan
+  // with set-in sleeves" resolves to raglan rather than silently keeping both.
+  const constructionText = asString(value.construction, "");
+  const construction =
+    (CONSTRUCTIONS as string[]).includes(constructionText)
+      ? (constructionText as Construction)
+      : (CONSTRUCTION_ALIASES.find(([re]) => re.test(constructionText))?.[1] ?? "worked-flat");
+
   return {
     name,
     motifKind,
@@ -84,7 +127,8 @@ export function coerceDesignIntent(value: unknown): DesignIntent | null {
     ),
     palette: palette.slice(0, 6),
     stitchPattern: asString(value.stitchPattern ?? value.stitch_pattern, "Stocking stitch"),
-    construction: asString(value.construction, "Worked in pieces and seamed"),
+    construction,
+    constructionNotes: constructionText || "Worked in pieces and seamed",
     designerNotes: asString(value.designerNotes ?? value.designer_notes ?? value.notes, ""),
   };
 }
@@ -120,13 +164,16 @@ Return exactly this JSON shape:
     { "role": string, "hex": "#rrggbb", "name": string }
   ],
   "stitchPattern": string,        // e.g. "2x2 rib with a horseshoe cable panel"
-  "construction": string,         // e.g. "top-down raglan, worked in the round"
+  "construction": "set-in-sleeve" | "raglan" | "drop-shoulder" | "circular-yoke"
+                  | "worked-flat" | "in-the-round" | "motifs-joined",
   "designerNotes": string         // one or two sentences of design advice
 }
 
 Rules:
 - hex must be exactly 6 hex digits with a leading #.
 - Choose motifKind honestly: if the request mentions cables, use "cable"; lace, use "lace".
+- construction must be EXACTLY one of the listed values. Pick one; they are mutually
+  exclusive. A garment cannot be both raglan and set-in-sleeve.
 - Do not include any stitch counts, measurements or yarn quantities.`;
 }
 

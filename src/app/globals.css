@@ -14,6 +14,10 @@
      - no inline hex colours — use a token utility (bg-ink, text-berry, ...)
      - no blur shadows — use shadow-pop / shadow-pop-lg / shadow-pop-sm
      - no rounded corners — the radius scale is deliberately 0
+     - ALWAYS give text room. Every panel, card, cell, badge and list item
+       needs real internal padding; nothing should touch a border or an edge.
+       Panels default to p-4; tighten to p-3 only for genuinely dense UI.
+     - never combine `overflow-hidden` with `.panel` or `.lift` (see below)
    ========================================================================== */
 
 @theme {
@@ -193,7 +197,13 @@ img[data-pixel] {
   border: 3px solid var(--color-ink);
 }
 
-/* --- lift: hover behaviour for interactive panels ----------------------- */
+/* --- lift: hover behaviour for interactive panels -----------------------
+   HAZARD: never put `overflow-hidden` on the same element as `.lift` or
+   `.panel`. The hover state translates the card -3px and casts a 7px offset
+   shadow, so clipping the box cuts the shadow and any artwork inside it — this
+   is exactly the "squares are half cut off when you hover" bug. If you need to
+   clip an image to the card, wrap the image in `.media` instead and leave the
+   lifting element unclipped. */
 .lift {
   transition:
     transform 0.14s var(--ease-snap),
@@ -206,6 +216,20 @@ img[data-pixel] {
 .lift:active {
   transform: translate(1px, 1px);
   box-shadow: var(--shadow-pop-sm);
+}
+
+/* Clip artwork HERE, never on the lifting card itself. */
+.media {
+  overflow: hidden;
+  position: relative;
+  background: var(--color-panel-sunk);
+}
+.media > img,
+.media > svg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 /* --- press: buttons ------------------------------------------------------ */
