@@ -17,7 +17,9 @@ import {
   type ChartCell,
   type SymbolChart,
   rowCounts,
+  rowGroups,
   rowNumber,
+  rowSide,
 } from "./model";
 import { getSymbol, plainSymbolId, symbolAllowedInCraft } from "./symbols";
 
@@ -36,6 +38,7 @@ export type ChartIssueCode =
   | "span/overlap"
   | "count/mismatch"
   | "count/empty-row"
+  | "cable/wrong-side"
   | "repeat/out-of-bounds"
   | "repeat/inverted";
 
@@ -68,6 +71,7 @@ export function validateChart(chart: SymbolChart): ValidationReport {
   }
   checkReconciliation(chart, issues);
   checkRepeats(chart, issues);
+  checkCableSides(chart, issues);
 
   const errors = issues.filter((i) => i.severity === "error");
   const warnings = issues.filter((i) => i.severity === "warning");
@@ -279,6 +283,34 @@ function checkRepeats(chart: SymbolChart, issues: ChartIssue[]) {
         code: "repeat/out-of-bounds",
         severity: "error",
         message: `repeat box "${box.id}" falls outside the ${chart.width}x${chart.height} chart`,
+      });
+    }
+  }
+}
+
+/**
+ * Cable crossings belong on right-side rows.
+ *
+ * Crossing on a wrong-side row is legal and occasionally deliberate, but it is
+ * awkward to work and almost always a mistake in a generated chart — the
+ * holding side inverts, so the crossing reads backwards from what the designer
+ * intended. A warning, not an error: a knitter who means it may keep it.
+ */
+function checkCableSides(chart: SymbolChart, issues: ChartIssue[]): void {
+  // Only flat knitting has wrong-side rows at all; every round of an
+  // in-the-round chart is worked from the right side.
+  if (chart.worked === "round") return;
+
+  for (let row = 0; row < chart.rows.length; row += 1) {
+    if (rowSide(chart, row) === "RS") continue;
+    for (const group of rowGroups(chart, row)) {
+      if (group.symbol?.category !== "cable") continue;
+      issues.push({
+        code: "cable/wrong-side",
+        severity: "warning",
+        message: `${group.symbol.abbreviation} crosses on row ${rowNumber(row)}, a wrong-side row; crossings are normally worked on right-side rows`,
+        row,
+        col: group.anchorCol,
       });
     }
   }

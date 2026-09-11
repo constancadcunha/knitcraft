@@ -145,3 +145,46 @@ describe("structural checks", () => {
     expect(report.warnings.map((i) => i.code)).toContain("count/empty-row");
   });
 });
+
+describe("cable crossings on wrong-side rows", () => {
+  /** A 4x2 panel with a 2/2 cable anchored on the given row. */
+  function withCableOnRow(rowIndex: number) {
+    let chart = createChart({ id: "c", craft: "knitting", width: 4, height: 2 });
+    for (let r = 0; r < 2; r += 1) {
+      const filled = fillRow(chart, r, ["k", "k", "k", "k"]);
+      if (!filled.ok) throw new Error(filled.error.message);
+      chart = filled.value;
+    }
+    const placed = placeSymbol(chart, rowIndex, 0, "2/2 RC");
+    if (!placed.ok) throw new Error(placed.error.message);
+    return placed.value;
+  }
+
+  it("warns, but does not error, when a crossing lands on a wrong-side row", () => {
+    // rows[1] is row 2, which is a WS row on a flat chart starting on RS.
+    const report = validateChart(withCableOnRow(1));
+    const warning = report.warnings.find((i) => i.code === "cable/wrong-side");
+    expect(warning).toBeDefined();
+    expect(warning?.row).toBe(1);
+    // A knitter who means it may keep it, so the chart is still valid.
+    expect(report.valid).toBe(true);
+  });
+
+  it("says nothing about a crossing on a right-side row", () => {
+    const report = validateChart(withCableOnRow(0));
+    expect(report.issues.filter((i) => i.code === "cable/wrong-side")).toHaveLength(0);
+  });
+
+  it("says nothing when worked in the round, where every round is a right side", () => {
+    let chart = createChart({ id: "c", craft: "knitting", width: 4, height: 2, worked: "round" });
+    for (let r = 0; r < 2; r += 1) {
+      const filled = fillRow(chart, r, ["k", "k", "k", "k"]);
+      if (filled.ok) chart = filled.value;
+    }
+    const placed = placeSymbol(chart, 1, 0, "2/2 RC");
+    if (!placed.ok) throw new Error(placed.error.message);
+    expect(
+      validateChart(placed.value).issues.filter((i) => i.code === "cable/wrong-side")
+    ).toHaveLength(0);
+  });
+});
