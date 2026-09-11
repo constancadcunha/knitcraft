@@ -13,10 +13,16 @@ const VARIANTS: Record<Variant, string> = {
   gold: "bg-gold text-ink hover:bg-gold-deep",
 };
 
+/**
+ * Every size clears a 44px tap target except `sm`, which is for chips in a
+ * dense row (piece pickers, filters) and still clears 36px. The old scale
+ * bottomed out at 33px, which is a mis-tap waiting to happen for someone
+ * holding needles in the other hand.
+ */
 const SIZES: Record<Size, string> = {
-  sm: "px-2.5 py-1.5 text-[9px]",
-  md: "px-4 py-2.5 text-[9px]",
-  lg: "px-6 py-3.5 text-[11px]",
+  sm: "min-h-9 px-3 py-2 text-[9px]",
+  md: "hit px-4 py-3 text-[9px]",
+  lg: "min-h-[3.25rem] px-6 py-4 text-[11px]",
 };
 
 function classes(variant: Variant, size: Size, full: boolean, extra?: string) {

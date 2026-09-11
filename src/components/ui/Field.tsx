@@ -16,16 +16,19 @@ function Wrap({
   children: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2">
       <label htmlFor={id} className="label text-ink-soft">
         {label}
       </label>
       {children}
       {hint && !error && (
-        <p className="text-tiny text-ink-faint">{hint}</p>
+        <p id={`${id}-hint`} className="text-tiny text-ink-faint">
+          {hint}
+        </p>
       )}
       {error && (
-        <p className="text-tiny text-berry" role="alert">
+        <p id={`${id}-hint`} className="text-tiny text-berry" role="alert">
+          {/* The word says what is wrong; the colour only reinforces it. */}
           {error}
         </p>
       )}
@@ -52,6 +55,7 @@ export function TextField({
         id={id}
         className={cn("field", error && "border-berry", className)}
         aria-invalid={error ? true : undefined}
+        aria-describedby={hint || error ? `${id}-hint` : undefined}
         {...rest}
       />
     </Wrap>
@@ -77,6 +81,7 @@ export function TextArea({
         id={id}
         className={cn("field resize-y", error && "border-berry", className)}
         aria-invalid={error ? true : undefined}
+        aria-describedby={hint || error ? `${id}-hint` : undefined}
         {...rest}
       />
     </Wrap>
@@ -99,7 +104,12 @@ export function SelectField({
   const id = rest.id ?? auto;
   return (
     <Wrap id={id} label={label} hint={hint} error={error}>
-      <select id={id} className={cn("field", className)} {...rest}>
+      <select
+        id={id}
+        className={cn("field", className)}
+        aria-describedby={hint || error ? `${id}-hint` : undefined}
+        {...rest}
+      >
         {children}
       </select>
     </Wrap>
@@ -113,17 +123,28 @@ export function Choice<T extends string>({
   options,
   onChange,
   className,
+  size = "md",
 }: {
   label?: ReactNode;
   value: T;
   options: ReadonlyArray<{ value: T; label: ReactNode }>;
   onChange: (value: T) => void;
   className?: string;
+  size?: "sm" | "md";
 }) {
+  const id = useId();
   return (
-    <div className={cn("flex flex-col gap-1.5", className)}>
-      {label && <span className="label text-ink-soft">{label}</span>}
-      <div className="flex flex-wrap gap-2" role="group">
+    <div className={cn("flex flex-col gap-2", className)}>
+      {label && (
+        <span id={`${id}-label`} className="label text-ink-soft">
+          {label}
+        </span>
+      )}
+      <div
+        className="flex flex-wrap gap-2"
+        role="group"
+        aria-labelledby={label ? `${id}-label` : undefined}
+      >
         {options.map((opt) => {
           const active = opt.value === value;
           return (
@@ -133,10 +154,16 @@ export function Choice<T extends string>({
               aria-pressed={active}
               onClick={() => onChange(opt.value)}
               className={cn(
-                "press px-3 py-2",
+                "press inline-flex items-center justify-center gap-2",
+                size === "sm" ? "min-h-9 px-3 py-2" : "hit px-3.5 py-3",
+                // The pressed option is filled AND carries a marker, so the
+                // selection survives being printed or read in greyscale.
                 active ? "bg-cobalt text-panel" : "bg-panel text-ink hover:bg-gold"
               )}
             >
+              {active && (
+                <span className="inline-block h-2 w-2 bg-panel" aria-hidden />
+              )}
               {opt.label}
             </button>
           );
