@@ -248,3 +248,47 @@ export function toCraftType(craft: LearnCraft): "knitting" | "crocheting" | unde
   if (craft === "crocheting") return "crocheting";
   return undefined;
 }
+
+/* ========================================================================== */
+/* LEARNING PATHS                                                             */
+/* ========================================================================== */
+
+/**
+ * WHY PATHS EXIST
+ * ---------------
+ * A card wall answers "what is a ssk?" It does not answer "I have never held
+ * needles, what do I do first?" — and that second question is the one a
+ * beginner actually arrives with. A path is an ORDERED curriculum: stages that
+ * each end in something the learner can now make, with the entries inside a
+ * stage listed in the order they should be read.
+ *
+ * The ordering is not decorative. `src/lib/learn/__tests__/paths.test.ts`
+ * asserts that whenever an entry's prerequisite is also in the same path, the
+ * prerequisite comes FIRST. That makes "this stage teaches ssk before it
+ * teaches the knit stitch" a failing test rather than a confusing afternoon.
+ */
+export interface PathStage {
+  /** Unique within its path. Used as the anchor id on the page. */
+  id: string;
+  title: string;
+  /** What the learner can do once this stage is finished. Concrete. */
+  goal: string;
+  /** A real thing to make with exactly these skills and nothing more. */
+  project: string;
+  /** Entry ids, in reading order. */
+  entries: readonly string[];
+}
+
+export interface LearnPath {
+  id: string;
+  craft: LearnCraft;
+  title: string;
+  /** One line under the title. */
+  subtitle: string;
+  stages: readonly PathStage[];
+}
+
+/** Every entry in a path, flattened into reading order. */
+export function pathEntryIds(path: LearnPath): readonly string[] {
+  return path.stages.flatMap((stage) => stage.entries);
+}

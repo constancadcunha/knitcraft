@@ -300,3 +300,11 @@ export function applyMotif(input: SymbolChart, options: MotifOptions): MotifResu
 
   return { chart, applied: true };
 }
+
+export {
+  chartFromImage,
+  reduceRow,
+  type ImportOptions,
+  type ImportResult,
+  type ImportedGrid,
+} from "./fromImage";

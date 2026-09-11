@@ -327,7 +327,7 @@ img[data-pixel] {
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
-  padding: 0.1875rem 0.4375rem;
+  padding: 0.3125rem 0.5625rem;
   border: 2px solid var(--color-ink);
   font-family: var(--font-ui);
   font-size: var(--text-micro);
@@ -339,7 +339,8 @@ img[data-pixel] {
 /* --- form controls ------------------------------------------------------ */
 .field {
   width: 100%;
-  padding: 0.5rem 0.625rem;
+  min-height: 2.75rem;
+  padding: 0.625rem 0.75rem;
   background: var(--color-panel);
   border: 3px solid var(--color-ink);
   color: var(--color-ink);
@@ -382,6 +383,68 @@ img[data-pixel] {
 ::-webkit-scrollbar-thumb {
   background: var(--color-ink);
   border: 3px solid var(--color-panel-sunk);
+}
+
+
+/* --- chart-board: the scroll box a chart SVG lives in --------------------
+   ChartView writes explicit `width`/`height` attributes on its <svg> AND
+   carries its own `max-w-full`. In a plain container that pair fights: the
+   width is clamped to the container while the intrinsic height attribute
+   stays at full size, so the SVG scales down inside a box that is still as
+   tall as the unscaled chart — a 60-row sweater back drew ~600px of blank
+   panel above and below itself. Undo the clamp here (a child selector
+   outranks the utility, and unlayered rules outrank Tailwind's layers) and
+   let the BOX scroll instead. A chart read at true cell size is the point;
+   scrolling to the part you are working is how chart paper works anyway. */
+.chart-board {
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--color-panel);
+  border: 3px solid var(--color-ink);
+  box-shadow: var(--shadow-inset-pop);
+  padding: 0.625rem;
+}
+.chart-board > svg {
+  max-width: none;
+  margin-inline: auto;
+}
+
+/* --- stat: a readout meant to be legible from across the room -----------
+   The tracker is looked at from wherever the knitting is — a metre away, on a
+   phone propped against a mug. These numbers are sized for that distance, not
+   for a desk. */
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 0.875rem;
+  border: 3px solid var(--color-ink);
+  background: var(--color-panel);
+}
+.stat-value {
+  font-family: var(--font-ui);
+  font-size: clamp(1.75rem, 8vw, 2.5rem);
+  line-height: 1;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- hit: the minimum comfortable target --------------------------------
+   44px, not the 24px WCAG floor: the person tapping is holding two needles
+   and a ball of yarn, and a mis-tap loses their place in the row. */
+.hit {
+  min-height: 2.75rem;
+}
+
+/* --- stripe: 45° ink hatching ------------------------------------------
+   Texture for surfaces that are deliberately empty — an unstarted meter, a
+   blank state, a finished-and-closed row. Reads as printed screentone. */
+.stripe {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--stripe-color, rgb(31 27 46 / 0.13)) 0 3px,
+    transparent 3px 8px
+  );
 }
 
 /* ============================================================================
