@@ -27,3 +27,22 @@ export {
   threadPerStitchMm,
   type FlossEstimate,
 } from "./floss";
+
+export {
+  addBackstitch,
+  addFrenchKnot,
+  cloneCrossStitchChart,
+  colourUsage,
+  createCrossStitchChart,
+  holeInBounds,
+  setStitch,
+  totalStitches,
+  type BackstitchLine,
+  type ColourUsage,
+  type CrossStitchCell,
+  type CrossStitchChart,
+  type FlossColour,
+  type FrenchKnot,
+  type HolePoint,
+  type StitchKind,
+} from "./chart";
