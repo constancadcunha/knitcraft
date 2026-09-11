@@ -77,8 +77,11 @@ describe("a project survives the whole journey", () => {
     const back = loaded.projects[0];
     expect(back.name).toBe("Emberwood Hat");
     expect(back.charts).toHaveLength(project.charts.length);
-    // The motif's colours must survive the round trip.
-    expect(back.charts[0].chart.colors).toContain("#e2483d");
+    // The motif's colours must survive the round trip. A ProjectChart may be
+    // either kind, so narrow before reaching for a yarn chart's palette.
+    const reloaded = back.charts[0].chart;
+    if (reloaded.craft === "cross-stitch") throw new Error("expected a yarn chart");
+    expect(reloaded.colors).toContain("#e2483d");
   });
 
   it("counts stitches through the reloaded project, and undoes them", () => {
