@@ -12,7 +12,11 @@
  *    knitter won't notice it until the row is wrong.
  */
 
+import { parseStitchSequence, type StitchCall, type StitchCraft } from "./stitchWords";
+
 export type VoiceCommand =
+  /** A run of named stitches, marked off one by one in the order spoken. */
+  | { kind: "sequence"; calls: StitchCall[] }
   | { kind: "increment"; by: number }
   | { kind: "decrement"; by: number }
   | { kind: "nextRow" }
@@ -79,6 +83,7 @@ export function parseSpokenNumber(text: string): number | null {
 
 /** Phrases that mean "+1", i.e. counting a single stitch out loud. */
 const TALLY = [
+  "one done", "done one", "that's one", "thats one",
   "next stitch", "one more", "plus one", "add one", "count one",
   "next", "count", "stitch", "yep", "yes", "yup", "okay", "check",
   "tick", "done", "got it", "there", "and", "one",
@@ -130,7 +135,10 @@ const RULES: Array<{
  * Rules are evaluated in order; the tally fallback runs last so that specific
  * phrases like "next row" are never swallowed by the bare "next" tally.
  */
-export function parseCommand(transcript: string): VoiceCommand | null {
+export function parseCommand(
+  transcript: string,
+  craft?: StitchCraft
+): VoiceCommand | null {
   const text = transcript
     .toLowerCase()
     .replace(/['\u2018\u2019]/g, "")   // "what's" -> "whats", never "what s"
@@ -146,6 +154,15 @@ export function parseCommand(transcript: string): VoiceCommand | null {
       const cmd = rule.build(m, text);
       if (cmd) return cmd;
     }
+  }
+
+  // A run of named stitches: "knit, purl, knit, purl, purl" marks five.
+  // Checked before the tally so a multi-stitch utterance is never collapsed
+  // into a single increment, and before bare-number handling so "knit two"
+  // reads as two knits rather than a jump to row 2.
+  const sequence = parseStitchSequence(text, craft);
+  if (sequence && sequence.length > 0) {
+    return { kind: "sequence", calls: sequence };
   }
 
   // Bare number on its own = jump the stitch count to that value.

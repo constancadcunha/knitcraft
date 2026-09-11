@@ -115,14 +115,18 @@ export function rowsFor(heightCm: number, gauge: Gauge): number {
   return Math.round(heightCm * rowsPerCm(gauge));
 }
 
-/** The width a given stitch count actually produces — the inverse of `stitchesFor`. */
+/**
+ * The width a given stitch count actually produces — the inverse of
+ * `stitchesFor`. Deliberately unrounded: this feeds schematics and yarn areas,
+ * and rounding here would let error accumulate across a dozen pieces.
+ */
 export function widthCmFor(stitches: number, gauge: Gauge): number {
-  return roundTo(stitches / stitchesPerCm(gauge), 3);
+  return stitches / stitchesPerCm(gauge);
 }
 
 /** The height a given row count actually produces — the inverse of `rowsFor`. */
 export function heightCmFor(rows: number, gauge: Gauge): number {
-  return roundTo(rows / rowsPerCm(gauge), 3);
+  return rows / rowsPerCm(gauge);
 }
 
 export function widthInFor(stitches: number, gauge: Gauge): number {

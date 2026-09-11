@@ -5,6 +5,7 @@ import { useVoiceCounter } from "@/hooks/useVoiceCounter";
 import { useSpeaker } from "@/hooks/useSpeaker";
 import { useWakeLock } from "@/hooks/useWakeLock";
 import type { VoiceCommand } from "@/lib/voice/parseCommand";
+import { describeSequence } from "@/lib/voice/stitchWords";
 import { Button } from "@/components/ui/Button";
 import { Meter, Tag } from "@/components/ui/Bits";
 import { cn } from "@/lib/cn";
@@ -28,7 +29,9 @@ export interface VoiceCounterProps {
 }
 
 const COMMANDS: Array<[string, string]> = [
-  ["“one” / “next”", "count one stitch"],
+  ["“one done” / “done”", "count one stitch"],
+  ["“knit, purl, knit”", "count each stitch named"],
+  ["“knit two, purl two”", "count a run at a time"],
   ["“plus five”", "count five"],
   ["“twenty four”", "set the count"],
   ["“next row”", "advance a row"],
@@ -79,6 +82,15 @@ export default function VoiceCounter({
       setLastHeard(describe(command));
 
       switch (command.kind) {
+        case "sequence": {
+          // Each named stitch marks one square, in the order spoken.
+          const n = command.calls.length;
+          onIncrement(n);
+          const next = stitchesDone + n;
+          if (next >= stitchesInRow) say(`Row ${rowNumber} complete.`);
+          else say(String(next));
+          break;
+        }
         case "increment": {
           onIncrement(command.by);
           const next = stitchesDone + command.by;
@@ -257,6 +269,8 @@ export default function VoiceCounter({
 
 function describe(command: VoiceCommand): string {
   switch (command.kind) {
+    case "sequence":
+      return `${describeSequence(command.calls)} (+${command.calls.length})`;
     case "increment": return `+${command.by}`;
     case "decrement": return `−${command.by}`;
     case "setCount": return `set to ${command.count}`;

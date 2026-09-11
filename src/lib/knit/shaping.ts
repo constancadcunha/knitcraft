@@ -339,14 +339,28 @@ export function bindOffCurve(stitches: number, options: BindOffOptions = {}): Bi
 
   const initial = Math.min(total, Math.max(1, Math.round(total * initialFraction)));
   let remainder = total - initial;
-  const twos = Math.floor((remainder * twoStepFraction) / 2);
+  // The steps have to get SMALLER as the curve flattens. If the first bind-off
+  // is already down to a single stitch there is no room for 2-stitch steps
+  // after it, or the edge would bulge back outwards.
+  const twos = initial >= 2 ? Math.floor((remainder * twoStepFraction) / 2) : 0;
   remainder -= twos * 2;
   const ones = remainder;
 
   const steps: BindOffStep[] = [];
-  steps.push({ stitches: initial, times: 1 });
-  if (twos > 0) steps.push({ stitches: 2, times: twos });
-  if (ones > 0) steps.push({ stitches: 1, times: ones });
+  const pushStep = (count: number, times: number) => {
+    if (times <= 0) return;
+    const last = steps[steps.length - 1];
+    // A 2-stitch initial bind-off followed by 2-stitch steps is one step of
+    // three, not two steps that look identical to the knitter.
+    if (last && last.stitches === count) {
+      steps[steps.length - 1] = { stitches: count, times: last.times + times };
+      return;
+    }
+    steps.push({ stitches: count, times });
+  };
+  pushStep(initial, 1);
+  pushStep(2, twos);
+  pushStep(1, ones);
 
   const shapingRows = steps.reduce((sum, s) => sum + s.times, 0);
   // With one edge the steps fall on alternate rows, so the span from the first
@@ -617,7 +631,7 @@ export interface ButtonholePlan {
 export function distributeButtonholes(
   bandRows: number,
   buttonCount: number,
-  options: { bottomOffsetRows?: number; topOffsetRows?: number; terms?: ShapingTerms } = {},
+  options: { bottomOffsetRows?: number; topOffsetRows?: number; minSpacingRows?: number; terms?: ShapingTerms } = {},
 ): ButtonholePlan {
   const terms = options.terms ?? KNIT_TERMS;
   const rowsTotal = Math.max(0, Math.trunc(bandRows));
@@ -662,6 +676,15 @@ export function distributeButtonholes(
     }
   }
   const spacingRows = count > 1 ? Math.round((last - first) / (count - 1)) : 0;
+
+  // Buttonholes closer than a few rows apart tear the band between them, and
+  // at zero spacing two "buttonholes" would land on the same row.
+  const minSpacing = Math.max(1, Math.trunc(options.minSpacingRows ?? 4));
+  if (count > 1 && spacingRows < minSpacing) {
+    warnings.push(
+      `${count} buttonholes over ${plural(rowsTotal, terms.row, terms.rows)} leaves only ${plural(spacingRows, terms.row, terms.rows)} between them; use fewer buttons or a longer band (minimum ${plural(minSpacing, terms.row, terms.rows)} apart).`,
+    );
+  }
 
   return {
     buttonCount: count,

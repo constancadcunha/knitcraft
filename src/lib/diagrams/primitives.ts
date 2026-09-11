@@ -498,25 +498,73 @@ export class PixelCanvas {
 }
 
 /**
- * Merge a cell set into horizontal runs and emit one path. `M x y h n v1 h-n z`
- * is the shortest way to express a run of cells; for a fabric swatch this turns
- * a few thousand cells into a few hundred subpaths.
+ * Merge a cell set into rectangles and emit one path.
+ *
+ * Cells are merged into horizontal runs, then runs of identical x and width in
+ * consecutive rows are merged vertically into a single rectangle. That second
+ * pass matters a lot for fabric swatches, where the same stitch repeats down a
+ * column: without it a 7x6 knit V repeated 42 times emits every run six times
+ * over. `M x y h w v h z` is the shortest way to write one rectangle: the
+ * closing `z` supplies the fourth side.
  */
 function pathData(rows: CellRows): string {
-  const out: string[] = [];
-  for (const y of [...rows.keys()].sort((a, b) => a - b)) {
+  // Pass 1: horizontal runs per row, as [x, width].
+  const runsByRow = new Map<number, Array<[number, number]>>();
+  for (const y of rows.keys()) {
     const xs = [...(rows.get(y) as Set<number>)].sort((a, b) => a - b);
+    const runs: Array<[number, number]> = [];
     let start = xs[0];
     let run = 0;
     for (let i = 0; i < xs.length; i++) {
       run++;
       if (i + 1 < xs.length && xs[i + 1] === xs[i] + 1) continue;
-      out.push(`M${start} ${y}h${run}v1h-${run}z`);
+      runs.push([start, run]);
       start = xs[i + 1];
       run = 0;
     }
+    runsByRow.set(y, runs);
   }
-  return out.join("");
+
+  // Pass 2: extend each run downwards while the row below repeats it exactly.
+  const ys = [...runsByRow.keys()].sort((a, b) => a - b);
+  const open = new Map<string, { x: number; w: number; y: number; h: number }>();
+  const out: string[] = [];
+
+  const flush = (rect: { x: number; w: number; y: number; h: number }) => {
+    // `z` closes the subpath back to the start point, so the fourth side is
+    // implied — writing `h-w` before it just costs bytes on every rectangle.
+    out.push(`M${rect.x} ${rect.y}h${rect.w}v${rect.h}z`);
+  };
+
+  for (let i = 0; i < ys.length; i++) {
+    const y = ys[i];
+    const seen = new Set<string>();
+
+    for (const [x, w] of runsByRow.get(y) as Array<[number, number]>) {
+      const key = `${x}:${w}`;
+      seen.add(key);
+      const existing = open.get(key);
+      // Only extend when this row is directly below the open rectangle.
+      if (existing && existing.y + existing.h === y) existing.h += 1;
+      else {
+        if (existing) flush(existing);
+        open.set(key, { x, w, y, h: 1 });
+      }
+    }
+
+    // Close anything this row did not repeat.
+    for (const [key, rect] of [...open]) {
+      if (!seen.has(key)) {
+        flush(rect);
+        open.delete(key);
+      }
+    }
+  }
+  for (const rect of open.values()) flush(rect);
+
+  // Rectangles come out in close order; sorting keeps output deterministic so
+  // two identical canvases always serialise byte-identically.
+  return out.sort().join("");
 }
 
 // ─── stitch motifs ──────────────────────────────────────────────────────────
