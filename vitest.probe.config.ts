@@ -10,7 +10,7 @@ export default defineConfig({
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
   test: {
-    include: ["scripts/**/*.probe.ts"],
+    include: ["scripts/**/*.probe.ts", "scripts/**/*.probe.tsx"],
     testTimeout: 180_000,
     hookTimeout: 180_000,
   },
