@@ -265,15 +265,27 @@ const KNIT_SYMBOLS: StitchSymbol[] = [
     rs: { abbr: "k", instruction: "knit" },
     ws: { abbr: "p", instruction: "purl" },
     repeatStyle: "count-suffix",
+    /**
+     * A BLANK square. This is the standard chart convention, not an omission.
+     *
+     * Knit is by far the most common stitch, so charts leave it empty and let
+     * everything else stand out against it — that is what makes a chart
+     * readable at a glance. Drawing a little "V" in every knit cell renders a
+     * picture of the finished fabric instead of a chart, which is dense and
+     * hard to read, and it is what the app did before.
+     *
+     * The legend still lists it, with an empty swatch, exactly as a printed
+     * pattern does.
+     */
     art: art([
       ".........",
-      ".#.....#.",
-      ".#.....#.",
-      "..#...#..",
-      "..#...#..",
-      "...#.#...",
-      "...#.#...",
-      "....#....",
+      ".........",
+      ".........",
+      ".........",
+      ".........",
+      ".........",
+      ".........",
+      ".........",
       ".........",
     ]),
   },
