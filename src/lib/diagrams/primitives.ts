@@ -504,8 +504,8 @@ export class PixelCanvas {
  * consecutive rows are merged vertically into a single rectangle. That second
  * pass matters a lot for fabric swatches, where the same stitch repeats down a
  * column: without it a 7x6 knit V repeated 42 times emits every run six times
- * over. `M x y h w v h z` is the shortest way to write one rectangle: the
- * closing `z` supplies the fourth side.
+ * over. `M x y h w v h h-w z` is one rectangle; all four sides are written
+ * because `z` only draws a straight line back to the start.
  */
 function pathData(rows: CellRows): string {
   // Pass 1: horizontal runs per row, as [x, width].
@@ -531,9 +531,10 @@ function pathData(rows: CellRows): string {
   const out: string[] = [];
 
   const flush = (rect: { x: number; w: number; y: number; h: number }) => {
-    // `z` closes the subpath back to the start point, so the fourth side is
-    // implied — writing `h-w` before it just costs bytes on every rectangle.
-    out.push(`M${rect.x} ${rect.y}h${rect.w}v${rect.h}z`);
+    // All four sides are required. `z` closes a subpath with a STRAIGHT LINE
+    // back to its start point, so `M x y h w v h z` draws a triangle, not a
+    // rectangle — dropping the fourth side sheared every sprite in the app.
+    out.push(`M${rect.x} ${rect.y}h${rect.w}v${rect.h}h-${rect.w}z`);
   };
 
   for (let i = 0; i < ys.length; i++) {

@@ -40,7 +40,7 @@ describe("PixelCanvas", () => {
     const cv = new PixelCanvas(20, 4);
     cv.hline(2, 1, 6, "ink");
     const svg = cv.toSVG(HEX_PALETTE);
-    expect(svg).toContain('d="M2 1h6v1z"');
+    expect(svg).toContain('d="M2 1h6v1h-6z"');
     // One path element, not six rects.
     expect(svg.match(/<path/g)).toHaveLength(1);
   });
@@ -51,7 +51,7 @@ describe("PixelCanvas", () => {
     cv.px(2, 99, "ink");
     cv.line(-20, 4, 40, 4, "ink");
     const svg = cv.toSVG(HEX_PALETTE);
-    expect(svg).toContain('d="M0 4h8v1z"');
+    expect(svg).toContain('d="M0 4h8v1h-8z"');
     expect(svg).not.toContain("-4");
   });
 
@@ -63,8 +63,8 @@ describe("PixelCanvas", () => {
     // The rows either side of the hole must be split into two runs. Runs are
     // merged vertically, so the hole appears as two tall rectangles flanking
     // it rather than one rectangle per row.
-    expect(svg).toContain("M0 3h3v4z");
-    expect(svg).toContain("M7 3h3v4z");
+    expect(svg).toContain("M0 3h3v4h-3z");
+    expect(svg).toContain("M7 3h3v4h-3z");
     // Nothing may be painted inside the hole itself.
     expect(svg).not.toContain("M3 3");
     expect(svg).not.toContain("M4 4");
@@ -107,7 +107,7 @@ describe("PixelCanvas", () => {
     // A leaned V is a different drawing — this is what separates k2tog from ssk.
     expect(plain.toSVG(HEX_PALETTE)).not.toEqual(leaning.toSVG(HEX_PALETTE));
     // The apex sits on the bottom row of the motif.
-    expect(plain.toSVG(HEX_PALETTE)).toContain("M3 5h1v1z");
+    expect(plain.toSVG(HEX_PALETTE)).toContain("M3 5h1v1h-1z");
   });
 
   it("draws a purl bump that is not a knit V", () => {
@@ -118,9 +118,16 @@ describe("PixelCanvas", () => {
     expect(v.toSVG(HEX_PALETTE)).not.toEqual(bump.toSVG(HEX_PALETTE));
   });
 
-  it("keeps a whole fabric of stitches under a few kilobytes", () => {
+  it("keeps a whole fabric of stitches small enough to inline", () => {
+    // These SVGs are inlined into the page as strings, so size matters.
+    //
+    // The bound is 5000 rather than 4096: a rectangle must write all four
+    // sides, because `z` only draws a straight line back to the start and
+    // `M x y h w v h z` is a triangle. Merging runs vertically as well as
+    // horizontally takes a 42-stitch fabric from 6493 bytes to about 4200,
+    // and this bound still fails if that merging regresses.
     const cv = new PixelCanvas(56, 42);
     for (let r = 0; r < 6; r++) for (let c = 0; c < 7; c++) knitV(cv, c * 8, r * 7, "yarn");
-    expect(cv.toSVG(DEFAULT_PALETTE).length).toBeLessThan(4096);
+    expect(cv.toSVG(DEFAULT_PALETTE).length).toBeLessThan(5000);
   });
 });
