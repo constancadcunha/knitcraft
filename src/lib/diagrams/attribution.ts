@@ -135,6 +135,16 @@ function curate(entries: readonly CuratedInput[], verified: string): readonly Ph
  */
 export const CURATED_PHOTOS: readonly PhotoCredit[] = curate(
   [
+    // — hands at work: what a drawing cannot show —
+    {
+      key: "cast-on",
+      file: "Caston.jpg",
+      title: "Caston",
+      author: "Mollie Taylor",
+      licence: "CC BY 2.0",
+      depicts: "A long-tail cast-on being worked, the loops sitting on the needle.",
+    },
+
     // — knitted fabric, for comparing against your own —
     {
       key: "stockinette",

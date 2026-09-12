@@ -6,7 +6,6 @@ import {
   DIFFICULTY_LABELS,
   LEARN_CRAFTS,
   countsByCraft,
-  isWritten,
   lessonsForCraft,
   photoForLesson,
   searchLessons,
@@ -14,16 +13,25 @@ import {
   type LearnEntry,
 } from "@/lib/learn/content";
 import { learnDiagram } from "@/lib/learn/diagrams";
-import { creditLine, diagramFor } from "@/lib/diagrams";
+import { diagramFor } from "@/lib/diagrams";
 import { Choice } from "@/components/ui/Field";
 import { EmptyState, Heading, Tag } from "@/components/ui/Bits";
 import { Button } from "@/components/ui/Button";
-import { cn } from "@/lib/cn";
+import LessonDialog from "@/components/LessonDialog";
 
-/** A lesson's drawing. Diagrams come from two sets depending on its origin. */
+/**
+ * A lesson's drawing, or null.
+ *
+ * `diagramFor` falls back to a craft-level generic when it has nothing
+ * specific, and that fallback is the SAME picture for every lesson that hits
+ * it — eight knitting techniques were all showing one fabric swatch. A
+ * repeated picture teaches nothing and reads as a bug, so an inexact match is
+ * dropped and the card simply has no image.
+ */
 function diagramSvg(lesson: LearnEntry): string | null {
   if (lesson.diagram.source === "learn") return learnDiagram(lesson.diagram.id) ?? null;
-  return diagramFor(lesson.diagram.id).svg || null;
+  const resolved = diagramFor(lesson.diagram.id);
+  return resolved.exact ? resolved.svg || null : null;
 }
 
 export default function LearnPage() {
@@ -35,6 +43,11 @@ export default function LearnPage() {
   const lessons = useMemo(
     () => searchLessons(lessonsForCraft(craft), query),
     [craft, query]
+  );
+
+  const openLesson = useMemo(
+    () => lessons.find((l) => l.id === open) ?? null,
+    [lessons, open]
   );
 
   return (
@@ -87,44 +100,43 @@ export default function LearnPage() {
             <LessonCard
               key={`${lesson.craft}-${lesson.id}`}
               lesson={lesson}
-              open={open === lesson.id}
-              onToggle={() => setOpen((id) => (id === lesson.id ? null : lesson.id))}
+              onOpen={() => setOpen(lesson.id)}
             />
           ))}
         </ul>
       )}
+
+      <LessonDialog
+        lesson={openLesson}
+        photo={openLesson ? photoForLesson(openLesson) : undefined}
+        diagram={openLesson ? diagramSvg(openLesson) : null}
+        onClose={() => setOpen(null)}
+      />
     </div>
   );
 }
 
 function LessonCard({
   lesson,
-  open,
-  onToggle,
+  onOpen,
 }: {
   lesson: LearnEntry;
-  open: boolean;
-  onToggle: () => void;
+  onOpen: () => void;
 }) {
   const photo = photoForLesson(lesson);
   const svg = diagramSvg(lesson);
 
   return (
-    <li className={cn("panel flex flex-col", open && "sm:col-span-2 lg:col-span-3")}>
-      {/*
-        The whole card is the control — clicking anywhere opens it. It is a
-        <button> so it is reachable by keyboard and announces its state, and
-        the expanded body sits outside it because a button may not contain
-        interactive children like the source links.
-      */}
+    <li className="panel lift flex flex-col">
+      {/* The whole tile is the control: a real button, so it is reachable by
+          keyboard and announces that it opens a dialog. */}
       <button
         type="button"
-        onClick={onToggle}
-        aria-expanded={open}
+        onClick={onOpen}
+        aria-haspopup="dialog"
         className="group flex flex-1 flex-col text-left"
       >
         {photo ? (
-          // A photograph of the real fabric. `.media` clips it, never the card.
           <span className="media block h-44 border-b-[3px] border-ink">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -139,7 +151,9 @@ function LessonCard({
             className="diagram-tile block h-44 border-b-[3px] border-ink bg-panel-sunk p-3 text-ink"
             dangerouslySetInnerHTML={{ __html: svg }}
           />
-        ) : null}
+        ) : (
+          <span className="dither block h-44 border-b-[3px] border-ink" aria-hidden />
+        )}
 
         <span className="flex flex-1 flex-col gap-2.5 p-4">
           <span className="flex flex-wrap items-start justify-between gap-2">
@@ -152,116 +166,10 @@ function LessonCard({
 
           <span className="block text-sm text-ink-soft">{lesson.summary}</span>
 
-          <span className="label mt-auto pt-1 text-berry">
-            {open ? "Close ▲" : "Read more ▼"}
-          </span>
+          <span className="label mt-auto pt-1 text-berry">Open lesson →</span>
         </span>
       </button>
-
-      {open && (
-        <div className="space-y-4 border-t-[3px] border-ink p-4">
-          {svg && photo && (
-            <div className="diagram-tile h-44 border-[3px] border-ink bg-panel-sunk p-3 text-ink"
-              dangerouslySetInnerHTML={{ __html: svg }}
-            />
-          )}
-
-          {lesson.appearance && (
-            <Section title="What it looks like">{lesson.appearance}</Section>
-          )}
-          {lesson.useFor && <Section title="Use it for">{lesson.useFor}</Section>}
-
-          {lesson.steps.length > 0 && (
-            <div>
-              <h4 className="label mb-2 text-ink-faint">How to work it</h4>
-              <ol className="space-y-2">
-                {lesson.steps.map((step) => (
-                  <li key={step.n} className="flex gap-3">
-                    <span className="label grid h-6 w-6 shrink-0 place-items-center border-[3px] border-ink bg-gold text-ink">
-                      {step.n}
-                    </span>
-                    <span className="min-w-0 pt-0.5">
-                      <span className="block text-sm text-ink">{step.text}</span>
-                      {step.note && (
-                        <span className="mt-1 block text-tiny text-ink-faint">{step.note}</span>
-                      )}
-                    </span>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
-
-          {lesson.pitfalls && lesson.pitfalls.length > 0 && (
-            <div>
-              <h4 className="label mb-2 text-berry">What goes wrong</h4>
-              <ul className="space-y-1.5">
-                {lesson.pitfalls.map((pitfall) => (
-                  <li key={pitfall} className="border-l-[3px] border-berry pl-3 text-sm text-ink-soft">
-                    {pitfall}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {lesson.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {lesson.tags.map((tag) => (
-                <Tag key={tag} tone="neutral">{tag}</Tag>
-              ))}
-            </div>
-          )}
-
-          {photo && (
-            <p className="text-tiny text-ink-faint">
-              Photo:{" "}
-              <a
-                href={photo.sourceUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline underline-offset-2 hover:text-berry"
-              >
-                {creditLine(photo)}
-              </a>
-            </p>
-          )}
-
-          {lesson.sources.length > 0 && (
-            <p className="text-tiny text-ink-faint">
-              Checked against:{" "}
-              {lesson.sources.map((source, i) => (
-                <span key={source}>
-                  {i > 0 && ", "}
-                  <a
-                    href={source}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="underline underline-offset-2 hover:text-berry"
-                  >
-                    {new URL(source).hostname.replace(/^www\./, "")}
-                  </a>
-                </span>
-              ))}
-            </p>
-          )}
-
-          {!isWritten(lesson) && (
-            <p className="text-tiny text-ink-faint">
-              This one is a reference card; the full written lesson is still to come.
-            </p>
-          )}
-        </div>
-      )}
     </li>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <h4 className="label mb-1 text-ink-faint">{title}</h4>
-      <p className="text-sm text-ink">{children}</p>
-    </div>
-  );
-}

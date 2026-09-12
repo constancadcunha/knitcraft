@@ -195,43 +195,39 @@ export function isWritten(lesson: LearnEntry): boolean {
  * its credit line — the old page showed ~20 CC BY images with no attribution
  * at all, which is what made them a problem, not the photographs themselves.
  */
+/**
+ * Lesson id -> curated photo key.
+ *
+ * STRICTLY ONE PHOTO PER LESSON, and one lesson per photo. Reusing a picture
+ * across entries is the exact failure being fixed: the old page resolved 45
+ * slots to 28 files, so six unrelated stitches all showed the same swatch and
+ * a knitted slip stitch was illustrated with a crochet photograph. A test
+ * enforces the uniqueness.
+ */
 const PHOTO_KEYS: Record<string, string> = {
   // knitting
+  "cast-on": "cast-on",
   knit: "knit-purl-anatomy",
-  purl: "knit-purl-anatomy",
   stockinette: "stockinette",
   garter: "garter",
   ribbing: "ribbing",
   cable: "cable",
-  "cable-stitch": "cable",
   brioche: "brioche",
   "stranded-colourwork": "stranded-colourwork",
-  colourwork: "stranded-colourwork",
-  "fair-isle": "stranded-colourwork",
   lace: "lace",
   "yarn-over": "yarn-over",
-  yo: "yarn-over",
   "short-rows": "short-rows",
   "slipped-stitch": "slipped-stitch",
-  "slip-stitch": "slipped-stitch",
   "picking-up-stitches": "picking-up-stitches",
-  grafting: "grafting",
   kitchener: "grafting",
   "reading-flat-charts": "knit-chart-symbols",
-  "reading-charts": "knit-chart-symbols",
+  "k-dropped-stitch": "slipped-stitch-mistake",
   // crochet
   "granny-square": "granny-square",
   "v-stitch": "v-stitch",
   "working-in-the-round": "working-in-the-round",
   "foundation-chain": "foundation-chain",
-  chain: "foundation-chain",
   "c-us-uk-terms": "crochet-terms-us-uk",
-  "c-spiral-vs-joined": "working-in-the-round",
-  "c-join-as-you-go": "granny-square",
-  "c-foundation-single": "foundation-chain",
-  "k-kitchener": "grafting",
-  "k-dropped-stitch": "slipped-stitch-mistake",
-  "k-abbreviations": "knit-chart-symbols",
 };
 
 export function photoForLesson(lesson: LearnEntry): PhotoCredit | undefined {
