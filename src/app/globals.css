@@ -218,6 +218,18 @@ img[data-pixel] {
   box-shadow: var(--shadow-pop-sm);
 }
 
+/* A sprite icon. The emitted SVG carries its own width/height, so without an
+   explicit box it renders at natural size and overruns whatever sits below it. */
+.sprite-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.sprite-icon > svg {
+  width: 100%;
+  height: 100%;
+}
+
 /* A tile holding an INLINE SVG diagram.
    `object-fit` does nothing for inline SVG — it only applies to replaced
    elements like <img>. An emitted diagram carries its own width/height

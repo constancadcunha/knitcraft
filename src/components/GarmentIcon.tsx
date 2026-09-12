@@ -52,7 +52,16 @@ function svgFor(type: string, active: boolean | undefined): string {
   const key = `${type}::${active ? "on" : "off"}`;
   const hit = CACHE.get(key);
   if (hit) return hit;
-  const svg = spriteCanvas(spriteFor(type)).toSVG(palette(active));
+
+  // The canvas emits a pixel width and height for its natural size. An icon has
+  // to fill whatever box the caller sized, so those are rewritten to 100% —
+  // done here rather than in CSS so the icon is correct even before a
+  // stylesheet loads. `preserveAspectRatio` is already "meet", so it scales
+  // rather than stretches.
+  const svg = spriteCanvas(spriteFor(type))
+    .toSVG(palette(active))
+    .replace(/\swidth="\d+"\sheight="\d+"/, ' width="100%" height="100%"');
+
   CACHE.set(key, svg);
   return svg;
 }
@@ -74,7 +83,7 @@ export function GarmentIcon({
 }: GarmentIconProps) {
   return (
     <span
-      className={className}
+      className={`sprite-icon ${className}`}
       role="img"
       aria-label={type}
       // The sprite is generated from our own fixed art, never user input.

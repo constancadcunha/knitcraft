@@ -11,7 +11,8 @@ import ChartView from "@/components/chart/ChartView";
 import ChartLegend from "@/components/chart/ChartLegend";
 import SymbolPalette from "@/components/chart/SymbolPalette";
 import { Button } from "@/components/ui/Button";
-import { Choice, SelectField, TextField } from "@/components/ui/Field";
+import { GarmentIcon } from "@/components/GarmentIcon";
+import { Choice, TextField } from "@/components/ui/Field";
 import { Panel } from "@/components/ui/Panel";
 import { Heading, Notice, Tag } from "@/components/ui/Bits";
 import { cn } from "@/lib/cn";
@@ -63,6 +64,10 @@ export default function ChartEditorPage() {
     [garment, craft, size, stitchesPer10cm, rowsPer10cm]
   );
 
+  // The editor opens on a short setup rather than the full control panel:
+  // being asked what you are making is what made this usable, and the grid is
+  // meaningless until it knows.
+  const [setupDone, setSetupDone] = useState(false);
   const [pieceIndex, setPieceIndex] = useState(0);
   const [edits, setEdits] = useState<Record<string, SymbolChart>>({});
   const [tool, setTool] = useState<Tool>("symbol");
@@ -128,70 +133,124 @@ export default function ChartEditorPage() {
     router.push(`/chart/${saved.id}?chart=${charts[0]?.id ?? ""}`);
   }
 
+  if (!setupDone) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
+        <Heading
+          eyebrow="Chart editor"
+          title="What are you charting?"
+          description="Answer these and the grid arrives already sized to your gauge, with a baseline drawn on it."
+        />
+
+        <div className="panel mt-8 space-y-6 p-5 sm:p-6">
+          <Choice
+            label="Craft"
+            value={craft}
+            options={[
+              { value: "knitting", label: "Knit" },
+              { value: "crocheting", label: "Crochet" },
+            ]}
+            onChange={(next) => {
+              setCraft(next);
+              setEdits({});
+              setSymbolId(next === "knitting" ? "k" : "sc");
+            }}
+          />
+
+          <div>
+            <span className="label mb-2 block text-ink-soft">What are you making?</span>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {GARMENT_TYPES.map((g) => {
+                const active = garment === g;
+                return (
+                  <button
+                    key={g}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => onGarment(g)}
+                    className={`flex flex-col items-center gap-1.5 border-[3px] border-ink p-2.5 transition-transform ${
+                      active ? "bg-gold shadow-pop-sm" : "bg-panel hover:-translate-y-0.5"
+                    }`}
+                  >
+                    <GarmentIcon type={g} active={active} className="h-10 w-10" />
+                    <span className="label text-center text-ink">{g}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <span className="label mb-2 block text-ink-soft">Size</span>
+            <div className="flex flex-wrap gap-2">
+              {sizes.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  aria-pressed={size === s}
+                  onClick={() => setSize(s)}
+                  className={`press px-3 py-2 ${
+                    size === s ? "bg-berry text-panel" : "bg-panel text-ink hover:bg-gold"
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TextField
+              label="Stitches per 10 cm"
+              type="number"
+              min={4}
+              max={60}
+              value={stitchesPer10cm}
+              onChange={(e) => setStitches(Number(e.target.value) || 22)}
+              hint="From a blocked swatch."
+            />
+            <TextField
+              label="Rows per 10 cm"
+              type="number"
+              min={4}
+              max={80}
+              value={rowsPer10cm}
+              onChange={(e) => setRows(Number(e.target.value) || 30)}
+            />
+          </div>
+
+          <div className="border-t-[3px] border-ink pt-5">
+            <p className="mb-3 text-sm text-ink-soft">
+              This will draft{" "}
+              <strong className="text-ink">
+                {draft.pieces.length} piece{draft.pieces.length === 1 ? "" : "s"}
+              </strong>
+              {piece ? `, starting with ${piece.panel.name} at ${piece.panel.stitches} × ${piece.panel.rows}` : ""}.
+            </p>
+            <Button size="lg" onClick={() => setSetupDone(true)}>
+              Open the grid →
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
       <Heading
         eyebrow="Chart editor"
-        title="Draw the fabric"
-        description="Pick what you're making and the grid is already sized to your gauge. Then draw colourwork, cables, lace or texture on it."
+        title={`${garment} · ${size}`}
+        description="Draw colourwork, cables, lace or texture. The grid is already sized to your gauge."
+        action={
+          <Button variant="secondary" onClick={() => setSetupDone(false)}>
+            Change what you&rsquo;re making
+          </Button>
+        }
       />
 
       <div className="mt-9 grid items-start gap-5 lg:grid-cols-[20rem_minmax(0,1fr)]">
         <div className="space-y-5">
-          <Panel title="What are you making?" accent="berry">
-            <div className="space-y-4">
-              <Choice
-                label="Craft"
-                value={craft}
-                options={[
-                  { value: "knitting", label: "Knit" },
-                  { value: "crocheting", label: "Crochet" },
-                ]}
-                onChange={(next) => {
-                  setCraft(next);
-                  setEdits({});
-                  setSymbolId(next === "knitting" ? "k" : "sc");
-                }}
-              />
-              <SelectField
-                label="Garment"
-                value={garment}
-                onChange={(e) => onGarment(e.target.value as GarmentType)}
-              >
-                {GARMENT_TYPES.map((g) => (
-                  <option key={g} value={g}>{g}</option>
-                ))}
-              </SelectField>
-              <SelectField
-                label="Size"
-                value={size}
-                onChange={(e) => setSize(e.target.value as GarmentSize)}
-              >
-                {sizes.map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </SelectField>
-              <div className="grid grid-cols-2 gap-3">
-                <TextField
-                  label="Sts / 10cm"
-                  type="number"
-                  min={4}
-                  max={60}
-                  value={stitchesPer10cm}
-                  onChange={(e) => setStitches(Number(e.target.value) || 22)}
-                />
-                <TextField
-                  label="Rows / 10cm"
-                  type="number"
-                  min={4}
-                  max={80}
-                  value={rowsPer10cm}
-                  onChange={(e) => setRows(Number(e.target.value) || 30)}
-                />
-              </div>
-            </div>
-          </Panel>
-
           {draft.warnings.length > 0 && (
             <Notice title="Assumptions made" role="status">
               <ul className="space-y-1.5">
