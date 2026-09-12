@@ -3,7 +3,7 @@ import Link from "next/link";
 import { GarmentIcon } from "@/components/GarmentIcon";
 import { ButtonLink } from "@/components/ui/Button";
 import { Panel } from "@/components/ui/Panel";
-import { Tag } from "@/components/ui/Bits";
+import { SectionHeading, Tag } from "@/components/ui/Bits";
 import {
   buildSamplerGrid,
   SAMPLER_PALETTE,
@@ -14,30 +14,28 @@ export const metadata: Metadata = {
   title: "StitchCraft Studio — knitting & crochet pattern builder",
 };
 
-const ACTIONS = [
+/** The three steps, in the order a project actually happens. */
+const STEPS = [
   {
     href: "/generate",
-    label: "Pattern Studio",
-    detail: "Describe a garment and get real gauge maths, sized to fit.",
-    accent: "bg-berry",
+    label: "Draft it",
+    detail:
+      "Say what you are making and which size. Every stitch count comes out of your own gauge swatch.",
+    accent: "bg-berry text-panel",
   },
   {
     href: "/chart-editor",
-    label: "Chart Editor",
-    detail: "Colourwork, cables, lace and texture on one grid.",
-    accent: "bg-cobalt",
-  },
-  {
-    href: "/learn",
-    label: "Stitch Library",
-    detail: "Every stitch drawn, not photographed badly.",
-    accent: "bg-fern",
+    label: "Draw it",
+    detail:
+      "The grid arrives already the right shape. Put colourwork, cables, lace or texture on it.",
+    accent: "bg-cobalt text-panel",
   },
   {
     href: "/saved",
-    label: "My Library",
-    detail: "Your projects, saved in this browser.",
-    accent: "bg-grape",
+    label: "Work it",
+    detail:
+      "Count row by row with the tracker — out loud if your hands are busy, which they are.",
+    accent: "bg-fern text-panel",
   },
 ] as const;
 
@@ -68,22 +66,22 @@ export default function HomePage() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
       {/* ---- hero ---------------------------------------------------- */}
-      <section className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:items-center">
+      <section className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:items-center lg:gap-12">
         <div>
           <Tag tone="gold">Knit &amp; crochet</Tag>
-          <h1 className="mt-4 font-display text-2xl leading-[1.6] text-ink sm:text-[28px] sm:leading-[1.6]">
+          <h1 className="mt-5 font-display text-2xl leading-[1.6] text-ink sm:text-[28px] sm:leading-[1.6]">
             A chart is
             <br />
             <span className="text-berry">pixel art</span>
             <br />
             you can wear.
           </h1>
-          <p className="mt-5 max-w-md text-base text-ink-soft">
+          <p className="mt-6 max-w-md text-base text-ink-soft">
             Design the chart, let the maths size it to a real body, then work it
             row by row — counting out loud, hands free.
           </p>
 
-          <div className="mt-7 flex flex-wrap gap-3">
+          <div className="mt-8 flex flex-wrap gap-3">
             <ButtonLink href="/generate" size="lg">
               Start a pattern
             </ButtonLink>
@@ -91,15 +89,20 @@ export default function HomePage() {
               Open the grid
             </ButtonLink>
           </div>
+
+          <p className="mt-6 flex flex-wrap items-center gap-x-3 gap-y-2 text-tiny text-ink-faint">
+            <span className="inline-block h-2 w-2 bg-fern" aria-hidden />
+            No account. No upload. Works offline once loaded.
+          </p>
         </div>
 
         {/* ---- chart sampler ------------------------------------------ */}
         <figure className="panel">
-          <figcaption className="flex items-center justify-between gap-3 border-b-[3px] border-ink bg-gold px-4 py-2.5">
+          <figcaption className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b-[3px] border-ink bg-gold px-4 py-3">
             <span className="label">Fair Isle sampler</span>
             <span className="label text-ink/70">row 1 at the bottom</span>
           </figcaption>
-          <div className="bg-panel p-3">
+          <div className="bg-panel p-4">
             <div
               className="grid gap-0 border-[3px] border-ink"
               style={{
@@ -122,52 +125,67 @@ export default function HomePage() {
         </figure>
       </section>
 
-      {/* ---- what it actually does ----------------------------------- */}
-      <section className="mt-14 grid gap-4 sm:grid-cols-3">
-        {PROMISES.map((p) => (
-          <Panel key={p.title} title={p.title} accent="cobalt">
-            <p className="text-sm text-ink-soft">{p.body}</p>
-          </Panel>
-        ))}
+      {/* ---- how it goes --------------------------------------------- */}
+      <section className="mt-16">
+        <SectionHeading count="Three steps">How a project goes</SectionHeading>
+        <ol className="grid gap-4 sm:grid-cols-3">
+          {STEPS.map((step, i) => (
+            <li key={step.href}>
+              <Link
+                href={step.href}
+                className="panel lift flex h-full flex-col gap-3 p-5"
+              >
+                <span className="flex items-center gap-3">
+                  {/* The step number is the sprite: square, outlined, filled. */}
+                  <span
+                    className={`label flex h-10 w-10 shrink-0 items-center justify-center border-[3px] border-ink text-[13px] ${step.accent}`}
+                    aria-hidden
+                  >
+                    {i + 1}
+                  </span>
+                  <span className="label text-ink">{step.label}</span>
+                </span>
+                <span className="text-sm text-ink-soft">{step.detail}</span>
+              </Link>
+            </li>
+          ))}
+        </ol>
       </section>
 
-      {/* ---- entry points -------------------------------------------- */}
-      <section className="mt-14">
-        <h2 className="label mb-4 text-ink-faint">Where to start</h2>
-        <div className="grid gap-4 sm:grid-cols-2">
-          {ACTIONS.map(({ href, label, detail, accent }) => (
-            <Link
-              key={href}
-              href={href}
-              className="panel lift flex items-center gap-4 p-4"
-            >
-              <span
-                className={`${accent} h-11 w-11 shrink-0 border-[3px] border-ink`}
-                aria-hidden
-              />
-              <span className="min-w-0">
-                <span className="label block text-ink">{label}</span>
-                <span className="mt-1 block text-sm text-ink-soft">{detail}</span>
-              </span>
-            </Link>
+      {/* ---- what it actually does ----------------------------------- */}
+      <section className="mt-16">
+        <SectionHeading>Why bother with this one</SectionHeading>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {PROMISES.map((p) => (
+            <Panel key={p.title} title={p.title} accent="cobalt" headingAs="h3">
+              <p className="text-sm text-ink-soft">{p.body}</p>
+            </Panel>
           ))}
         </div>
       </section>
 
       {/* ---- garments ------------------------------------------------ */}
-      <section className="mt-14">
-        <h2 className="label mb-4 text-ink-faint">Built to fit</h2>
-        <div className="grid gap-4 sm:grid-cols-3">
+      <section className="mt-16">
+        <SectionHeading count="18 garment kinds">Built to fit</SectionHeading>
+        <ul className="grid gap-4 sm:grid-cols-3">
           {GARMENTS.map((item) => (
-            <div key={item.type} className="panel flex items-center gap-3 p-4">
+            <li key={item.type} className="panel flex items-center gap-4 p-5">
               <GarmentIcon type={item.type} active className="h-14 w-14 shrink-0" />
               <div className="min-w-0">
                 <h3 className="label text-ink">{item.type}</h3>
-                <p className="mt-1 text-sm text-ink-soft">{item.text}</p>
+                <p className="mt-1.5 text-sm text-ink-soft">{item.text}</p>
               </div>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
+        <p className="mt-5 text-sm text-ink-soft">
+          <Link
+            href="/generate"
+            className="inline-flex min-h-11 items-center underline underline-offset-4 hover:text-berry"
+          >
+            See every garment the drafter knows →
+          </Link>
+        </p>
       </section>
     </div>
   );

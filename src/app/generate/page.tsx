@@ -11,7 +11,7 @@ import { GarmentIcon } from "@/components/GarmentIcon";
 import { Button } from "@/components/ui/Button";
 import { Choice, SelectField, TextArea, TextField } from "@/components/ui/Field";
 import { Panel } from "@/components/ui/Panel";
-import { Heading, Tag } from "@/components/ui/Bits";
+import { Heading, Loading, Notice, SectionHeading, Tag } from "@/components/ui/Bits";
 import type { DesignIntent } from "@/lib/ai/designIntent";
 import {
   GARMENT_TYPES,
@@ -155,8 +155,9 @@ export default function StudioPage() {
         description="The measurements, stitch counts and yardage are worked out from your gauge. The AI only suggests how it should look."
       />
 
-      <div className="mt-8 grid gap-6 lg:grid-cols-[22rem_minmax(0,1fr)]">
-        <div className="space-y-6">
+      <div className="mt-9 grid items-start gap-5 lg:grid-cols-[22rem_minmax(0,1fr)]">
+        <div className="space-y-5">
+          <SectionHeading count="Step 1">The shape</SectionHeading>
           <Panel title="The garment" accent="berry">
             <div className="space-y-4">
               <Choice
@@ -204,7 +205,8 @@ export default function StudioPage() {
             </div>
           </Panel>
 
-          <Panel title="The look" accent="grape">
+          <SectionHeading className="pt-2" count="Step 2">The look</SectionHeading>
+          <Panel title="Describe the design" accent="grape">
             <div className="space-y-4">
               <TextArea
                 label="Describe it"
@@ -220,7 +222,7 @@ export default function StudioPage() {
                 onChange={(e) => setStitchPreference(e.target.value)}
               />
               <div>
-                <label htmlFor="studio-photo" className="label mb-1.5 block text-ink-soft">
+                <label htmlFor="studio-photo" className="label mb-2 block text-ink-soft">
                   Or start from a photo
                 </label>
                 <input
@@ -241,28 +243,53 @@ export default function StudioPage() {
                   </div>
                 )}
               </div>
-              <Button
-                full
-                onClick={askForDesign}
-                disabled={design.loading || (!description && !imageBase64)}
-              >
-                {design.loading ? "Designing…" : "Suggest a design"}
-              </Button>
+              <div className="space-y-2.5">
+                <Button
+                  full
+                  size="lg"
+                  onClick={askForDesign}
+                  disabled={design.loading || (!description && !imageBase64)}
+                  aria-busy={design.loading}
+                >
+                  {design.loading ? "Designing…" : "Suggest a design"}
+                </Button>
+                {!description && !imageBase64 && (
+                  <p className="text-tiny text-ink-faint">
+                    Write a description or add a photo first. The pattern on the
+                    right is already drafted either way.
+                  </p>
+                )}
+              </div>
             </div>
           </Panel>
         </div>
 
-        <div className="space-y-6">
-          {design.degradedReason && (
-            <div className="panel bg-gold p-4">
-              <h3 className="label text-ink">Designing without the AI</h3>
-              <p className="mt-1.5 text-sm text-ink">{design.degradedReason}</p>
-              <p className="mt-1.5 text-sm text-ink-soft">
-                Your pattern is still drafted below — every measurement and stitch
-                count comes from the engine, not the model.
-              </p>
-            </div>
-          )}
+        <div className="space-y-5">
+          <SectionHeading count="Live">The draft</SectionHeading>
+
+          {/* The draft is recomputed on every change, so the result needs to be
+              announced rather than silently swapped under the reader. */}
+          <div aria-live="polite" className="space-y-5">
+            {design.loading && (
+              <Panel title="Asking the designer" accent="grape">
+                <Loading>Sketching a look for your {garment.toLowerCase()}</Loading>
+                <p className="mt-3 text-sm text-ink-soft">
+                  The measurements below are already final — this only decides
+                  how it looks.
+                </p>
+              </Panel>
+            )}
+
+            {design.degradedReason && (
+              <Notice title="Designing without the AI" role="status">
+                <p>{design.degradedReason}</p>
+                <p className="mt-2 text-ink-soft">
+                  Your pattern is still drafted below — every measurement and
+                  stitch count comes from the engine, not the model.
+                </p>
+              </Notice>
+            )}
+          </div>
 
           {design.intent && (
             <Panel
@@ -277,21 +304,25 @@ export default function StudioPage() {
                 </div>
                 <p className="text-sm text-ink">{design.intent.motifDescription}</p>
                 <p className="text-sm text-ink-soft">{design.intent.stitchPattern}</p>
-                <ul className="flex flex-wrap gap-2">
-                  {design.intent.palette.map((colour) => (
-                    <li
-                      key={colour.hex}
-                      className="flex items-center gap-2 border-[3px] border-ink bg-panel py-1.5 pl-1.5 pr-3"
-                    >
-                      <span
-                        className="h-5 w-5 border-2 border-ink"
-                        style={{ backgroundColor: colour.hex }}
-                        aria-hidden
-                      />
-                      <span className="label text-ink">{colour.name}</span>
-                    </li>
-                  ))}
-                </ul>
+                <div>
+                  <p className="label mb-2 text-ink-soft">Palette</p>
+                  <ul className="flex flex-wrap gap-2.5">
+                    {design.intent.palette.map((colour) => (
+                      <li
+                        key={colour.hex}
+                        className="flex items-center gap-2.5 border-[3px] border-ink bg-panel py-2 pl-2 pr-3.5"
+                      >
+                        <span
+                          className="h-5 w-5 shrink-0 border-2 border-ink"
+                          style={{ backgroundColor: colour.hex }}
+                          aria-hidden
+                        />
+                        {/* The name carries the colour in words too. */}
+                        <span className="label text-ink">{colour.name}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
                 {design.intent.designerNotes && (
                   <p className="border-t-[3px] border-ink pt-3 text-sm text-ink-soft">
                     {design.intent.designerNotes}
@@ -313,25 +344,36 @@ export default function StudioPage() {
             <div className="flex items-start gap-4">
               <GarmentIcon type={garment} active className="h-16 w-16 shrink-0" />
               <div className="min-w-0">
-                <p className="text-sm text-ink">
+                <p className="text-base text-ink">
                   {garment} in size {size}, drafted at {stitchesPer10cm} sts and{" "}
                   {rowsPer10cm} rows to 10 cm.
                 </p>
-                {draft.warnings.length > 0 && (
-                  <ul className="mt-2 space-y-1">
-                    {draft.warnings.map((w) => (
-                      <li key={w} className="text-tiny text-rust">{w}</li>
-                    ))}
-                  </ul>
-                )}
+                <p className="mt-1.5 text-sm text-ink-soft">
+                  Every number here came from your gauge, not from the model.
+                </p>
               </div>
             </div>
 
-            <ul className="mt-4 space-y-2">
+            {draft.warnings.length > 0 && (
+              <ul className="mt-4 space-y-2">
+                {draft.warnings.map((w) => (
+                  <li
+                    key={w}
+                    className="flex gap-2.5 border-[3px] border-rust bg-panel p-3 text-sm text-ink"
+                  >
+                    {/* The warning says what it is; rust is only reinforcement. */}
+                    <span className="label shrink-0 pt-0.5 text-rust">Note</span>
+                    <span className="min-w-0">{w}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <ul className="mt-4 space-y-2.5">
               {colouredPieces.map((piece) => (
                 <li
                   key={piece.chart.id}
-                  className="flex flex-wrap items-baseline justify-between gap-2 border-[3px] border-ink bg-panel p-3"
+                  className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1.5 border-[3px] border-ink bg-panel p-3.5"
                 >
                   <span className="label text-ink">{piece.panel.name}</span>
                   <span className="text-sm text-ink-soft">
@@ -344,16 +386,33 @@ export default function StudioPage() {
           </Panel>
 
           {colouredPieces[0] && (
-            <Panel title={`Preview — ${colouredPieces[0].panel.name}`} accent="fern">
-              <div className="overflow-x-auto">
-                <ChartView chart={colouredPieces[0].chart} cellSize={14} showRowNumbers={false} />
+            <Panel
+              title={`Preview — ${colouredPieces[0].panel.name}`}
+              accent="fern"
+              bodyClassName="p-3 sm:p-4"
+            >
+              <div className="chart-fit">
+                <ChartView
+                  chart={colouredPieces[0].chart}
+                  cellSize={14}
+                  showRowNumbers={false}
+                />
               </div>
+              <p className="mt-3 text-tiny text-ink-faint">
+                The whole piece, scaled to fit. You can draw on it after saving.
+              </p>
             </Panel>
           )}
 
-          <Button size="lg" full onClick={save}>
-            Save to library
-          </Button>
+          <Panel title="Save it" accent="gold">
+            <p className="text-sm text-ink-soft">
+              Saving keeps the pattern in this browser and opens the row tracker
+              on the first piece.
+            </p>
+            <Button size="lg" full onClick={save} className="mt-4">
+              Save to library
+            </Button>
+          </Panel>
         </div>
       </div>
     </div>

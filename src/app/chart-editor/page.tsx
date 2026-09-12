@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { draftGarment } from "@/lib/garments";
@@ -13,7 +13,8 @@ import SymbolPalette from "@/components/chart/SymbolPalette";
 import { Button } from "@/components/ui/Button";
 import { Choice, SelectField, TextField } from "@/components/ui/Field";
 import { Panel } from "@/components/ui/Panel";
-import { Heading, Tag } from "@/components/ui/Bits";
+import { Heading, Notice, Tag } from "@/components/ui/Bits";
+import { cn } from "@/lib/cn";
 import {
   GARMENT_TYPES,
   defaultSizeForGarment,
@@ -27,6 +28,17 @@ import {
 type Tool = "symbol" | "colour" | "erase";
 
 const PALETTE = ["#f5ede0", "#2b2b2b", "#e2483d", "#2f6fd0", "#3f9e56", "#f2b53c"];
+
+/** Human names for the palette, so the swatches are not colour-only controls. */
+const PALETTE_NAMES = ["Cream", "Charcoal", "Berry", "Cobalt", "Fern", "Gold"];
+
+/** Cell sizes the zoom control steps through, in px. 0 means "fit the column". */
+const ZOOMS = [
+  { value: 0, label: "Fit" },
+  { value: 18, label: "S" },
+  { value: 26, label: "M" },
+  { value: 38, label: "L" },
+] as const;
 
 export default function ChartEditorPage() {
   const router = useRouter();
@@ -57,6 +69,7 @@ export default function ChartEditorPage() {
   const [symbolId, setSymbolId] = useState<string>("k");
   const [colorIndex, setColorIndex] = useState(1);
   const [name, setName] = useState("");
+  const [zoom, setZoom] = useState(0);
 
   const piece = draft.pieces[Math.min(pieceIndex, draft.pieces.length - 1)];
   const chart = piece ? (edits[piece.chart.id] ?? piece.chart) : null;
@@ -123,8 +136,8 @@ export default function ChartEditorPage() {
         description="Pick what you're making and the grid is already sized to your gauge. Then draw colourwork, cables, lace or texture on it."
       />
 
-      <div className="mt-8 grid gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
-        <div className="space-y-6">
+      <div className="mt-9 grid items-start gap-5 lg:grid-cols-[20rem_minmax(0,1fr)]">
+        <div className="space-y-5">
           <Panel title="What are you making?" accent="berry">
             <div className="space-y-4">
               <Choice
@@ -180,19 +193,19 @@ export default function ChartEditorPage() {
           </Panel>
 
           {draft.warnings.length > 0 && (
-            <div className="panel bg-gold p-4">
-              <h3 className="label text-ink">Assumptions</h3>
-              <ul className="mt-2 space-y-1">
+            <Notice title="Assumptions made" role="status">
+              <ul className="space-y-1.5">
                 {draft.warnings.map((w) => (
-                  <li key={w} className="text-sm text-ink">{w}</li>
+                  <li key={w}>{w}</li>
                 ))}
               </ul>
-            </div>
+            </Notice>
           )}
 
           <Panel title="Tool" accent="cobalt">
             <div className="space-y-4">
               <Choice
+                label="What to draw"
                 value={tool}
                 options={[
                   { value: "symbol", label: "Stitch" },
@@ -203,20 +216,34 @@ export default function ChartEditorPage() {
               />
 
               {tool === "colour" && (
-                <div className="flex flex-wrap gap-2">
-                  {PALETTE.map((hex, i) => (
-                    <button
-                      key={hex}
-                      type="button"
-                      aria-label={`Colour ${i + 1}`}
-                      aria-pressed={colorIndex === i}
-                      onClick={() => setColorIndex(i)}
-                      className={`h-9 w-9 border-[3px] border-ink ${
-                        colorIndex === i ? "shadow-pop-sm" : ""
-                      }`}
-                      style={{ backgroundColor: hex }}
-                    />
-                  ))}
+                <div>
+                  <p className="label mb-2 text-ink-soft">Yarn colour</p>
+                  <div className="flex flex-wrap gap-2.5" role="group" aria-label="Yarn colour">
+                    {PALETTE.map((hex, i) => (
+                      <button
+                        key={hex}
+                        type="button"
+                        aria-label={PALETTE_NAMES[i] ?? `Colour ${i + 1}`}
+                        aria-pressed={colorIndex === i}
+                        onClick={() => setColorIndex(i)}
+                        /* The selected swatch is marked by a ring of ink and a
+                           raised shadow, never by its own colour — you cannot
+                           tell "selected" from a colour you also just painted. */
+                        className={cn(
+                          "hit flex w-11 items-center justify-center border-[3px] border-ink",
+                          colorIndex === i && "shadow-pop"
+                        )}
+                        style={{ backgroundColor: hex }}
+                      >
+                        {colorIndex === i && (
+                          <span className="h-2.5 w-2.5 border-2 border-ink bg-panel" aria-hidden />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-2.5 text-tiny text-ink-faint">
+                    Painting with {PALETTE_NAMES[colorIndex] ?? `colour ${colorIndex + 1}`}.
+                  </p>
                 </div>
               )}
 
@@ -227,62 +254,128 @@ export default function ChartEditorPage() {
           </Panel>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-5">
           <Panel
             title="Pieces"
             accent="grape"
-            action={<Tag tone="neutral">{draft.pieces.length}</Tag>}
+            action={
+              <Tag tone="neutral">
+                {draft.pieces.length} piece{draft.pieces.length === 1 ? "" : "s"}
+              </Tag>
+            }
           >
-            <div className="flex flex-wrap gap-2">
+            <ul className="flex flex-wrap gap-2">
               {draft.pieces.map((p, i) => (
-                <Button
-                  key={p.chart.id}
-                  size="sm"
-                  variant={i === pieceIndex ? "primary" : "secondary"}
-                  onClick={() => setPieceIndex(i)}
-                >
-                  {p.panel.name}
-                </Button>
+                <li key={p.chart.id}>
+                  <Button
+                    size="sm"
+                    variant={i === pieceIndex ? "primary" : "secondary"}
+                    aria-pressed={i === pieceIndex}
+                    onClick={() => setPieceIndex(i)}
+                  >
+                    {i === pieceIndex && (
+                      <span className="h-2 w-2 bg-panel" aria-hidden />
+                    )}
+                    {p.panel.name}
+                  </Button>
+                </li>
               ))}
-            </div>
+            </ul>
             {piece && (
-              <p className="mt-3 text-sm text-ink-soft">
-                {piece.panel.stitches} sts × {piece.panel.rows} rows ·{" "}
-                {piece.panel.widthCm.toFixed(1)} × {piece.panel.heightCm.toFixed(1)} cm
-                {piece.panel.note ? ` · ${piece.panel.note}` : ""}
-              </p>
+              <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t-[3px] border-ink/10 pt-4 sm:grid-cols-4">
+                <Fact label="Stitches" value={piece.panel.stitches} />
+                <Fact label="Rows" value={piece.panel.rows} />
+                <Fact label="Width" value={`${piece.panel.widthCm.toFixed(1)} cm`} />
+                <Fact label="Height" value={`${piece.panel.heightCm.toFixed(1)} cm`} />
+              </dl>
+            )}
+            {piece?.panel.note && (
+              <p className="mt-3 text-sm text-ink-soft">{piece.panel.note}</p>
             )}
           </Panel>
 
           {chart && (
             <>
-              <Panel title={piece?.panel.name ?? "Chart"} accent="cobalt">
-                <div className="overflow-x-auto">
-                  <ChartView chart={chart} cellSize={18} onCellClick={edit} />
+              <Panel
+                title={piece?.panel.name ?? "Chart"}
+                accent="cobalt"
+                bodyClassName="p-3 sm:p-4"
+                action={
+                  <div className="flex items-center gap-2">
+                    <span className="label text-panel">Zoom</span>
+                    <div className="flex" role="group" aria-label="Chart zoom">
+                      {ZOOMS.map((z) => (
+                        <button
+                          key={z.value}
+                          type="button"
+                          aria-pressed={zoom === z.value}
+                          onClick={() => setZoom(z.value)}
+                          className={cn(
+                            "label h-9 w-11 border-[3px] border-ink",
+                            zoom === z.value
+                              ? "bg-ink text-panel"
+                              : "bg-panel text-ink hover:bg-gold"
+                          )}
+                        >
+                          {z.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                }
+              >
+                <div
+                  className={zoom === 0 ? "chart-fit" : "chart-board max-h-[70vh]"}
+                  tabIndex={zoom === 0 ? undefined : 0}
+                  role={zoom === 0 ? undefined : "region"}
+                  aria-label={zoom === 0 ? undefined : "Chart, scrollable"}
+                >
+                  <ChartView chart={chart} cellSize={zoom || 18} onCellClick={edit} />
                 </div>
+                <p className="mt-3 text-tiny text-ink-faint" aria-live="polite">
+                  {tool === "erase"
+                    ? "Tap a square to clear it."
+                    : tool === "colour"
+                      ? `Tap a square to paint it ${(PALETTE_NAMES[colorIndex] ?? "").toLowerCase()}.`
+                      : "Tap a square to place the selected stitch."}{" "}
+                  Row 1 is at the bottom.
+                </p>
               </Panel>
 
-              <Panel title="Stitch key" accent="fern">
+              <Panel title="What the symbols mean" accent="fern">
                 <ChartLegend chart={chart} />
               </Panel>
             </>
           )}
 
           <Panel title="Save it" accent="gold">
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="min-w-48 flex-1">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+              <div className="min-w-0 flex-1">
                 <TextField
                   label="Project name"
                   placeholder={`${garment} (${size})`}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
+                  hint="Leave it blank and the garment and size are used."
                 />
               </div>
-              <Button size="lg" onClick={save}>Save to library</Button>
+              <Button size="lg" onClick={save} className="shrink-0">
+                Save to library
+              </Button>
             </div>
           </Panel>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** One labelled number in the piece summary. */
+function Fact({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div>
+      <dt className="label text-ink-faint">{label}</dt>
+      <dd className="mt-1 text-sm text-ink">{value}</dd>
     </div>
   );
 }
