@@ -297,7 +297,7 @@ describe("a chart that is only a repeat window", () => {
   });
 
   it("leaves a row alone when it does not repeat cleanly", () => {
-    let chart = createChart({ id: "u", craft: "knitting", width: 5, height: 1 });
+    const chart = createChart({ id: "u", craft: "knitting", width: 5, height: 1 });
     const filled = fillRow(chart, 0, ["k", "p", "k", "p", "k"]);
     if (!filled.ok) throw new Error(filled.error.message);
     const boxed = addRepeatBox(filled.value, {
