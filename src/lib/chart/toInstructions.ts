@@ -93,6 +93,16 @@ export interface InstructionOptions {
   showStitchCounts?: boolean;
   /** Emit the leading cast-on / foundation line. Default true. */
   includeCastOn?: boolean;
+  /**
+   * The piece's REAL stitch count, when the chart is only a repeat window onto
+   * a wider panel.
+   *
+   * A chart is clipped to an editable size (60 stitches), so a 106-stitch back
+   * charted at 60 would otherwise tell the knitter to cast on 60 and produce a
+   * garment half the width. Supply the true count and the cast-on line, the
+   * per-row counts and the repeat wording all use it.
+   */
+  totalStitches?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,12 +114,27 @@ export function chartToInstructions(
   const showCounts = options.showStitchCounts ?? true;
   const includeCastOn = options.includeCastOn ?? true;
 
+  // Scaling row counts to the real panel width is only sound when the chart
+  // does not shape: if any row consumed or produced a different number than the
+  // cast-on, the counts are the chart's own and must not be rewritten.
+  const chartCastOn = castOnCount(chart);
+  const isPlainPanel = chart.rows.every((_, i) => {
+    const c = rowCounts(chart, i);
+    return c.consumed === chartCastOn && c.produced === chartCastOn;
+  });
+  const scaleTo =
+    options.totalStitches && isPlainPanel && options.totalStitches !== chartCastOn
+      ? options.totalStitches
+      : undefined;
+
   const rows: RowInstruction[] = [];
   for (let rowIndex = 0; rowIndex < chart.height; rowIndex += 1) {
-    rows.push(buildRow(chart, rowIndex, options, showCounts));
+    rows.push(buildRow(chart, rowIndex, options, showCounts, scaleTo));
   }
 
-  const castOn = castOnCount(chart);
+  // When the chart is a window onto a wider panel, the piece's real stitch
+  // count governs the prose; the chart only supplies the stitch pattern.
+  const castOn = options.totalStitches ?? castOnCount(chart);
   const castOnText =
     chart.craft === "knitting"
       ? `Cast on ${castOn} ${plural(castOn)}.`
@@ -134,6 +159,8 @@ function buildRow(
   rowIndex: number,
   options: InstructionOptions,
   showCounts: boolean,
+  /** Real panel width, when the chart is only a repeat window. */
+  scaleTo?: number,
 ): RowInstruction {
   const side = rowSide(chart, rowIndex);
   const counts = rowCounts(chart, rowIndex);
@@ -149,7 +176,9 @@ function buildRow(
     ? renderWithRepeat(groups, box, side, options)
     : renderPlain(groups, side, options);
 
-  const suffix = showCounts ? ` (${counts.produced} ${plural(counts.produced)})` : "";
+  const produced = scaleTo ?? counts.produced;
+  const consumed = scaleTo ?? counts.consumed;
+  const suffix = showCounts ? ` (${produced} ${plural(produced)})` : "";
   const text = `${label}: ${body}.${suffix}`;
 
   return {
@@ -159,8 +188,8 @@ function buildRow(
     label,
     body,
     text,
-    stitchesBefore: counts.consumed,
-    stitchesAfter: counts.produced,
+    stitchesBefore: consumed,
+    stitchesAfter: produced,
     runs,
   };
 }
@@ -210,7 +239,10 @@ function renderWithRepeat(
   if (inside.length === 0) return renderPlain(groups, side, options);
 
   const beforeRuns = compress(before, side);
-  const insideRuns = compress(inside, side);
+  // A box spanning the whole row means "this fabric repeats", not "print every
+  // stitch between the asterisks". Reduce it to its smallest repeating unit, or
+  // a 2x2 rib across 60 stitches prints p2,k2 thirty times inside the repeat.
+  const insideRuns = compress(smallestPeriod(inside), side);
   const afterRuns = compress(after, side);
 
   const remaining = afterRuns.reduce((sum, run) => sum + run.consumed, 0);
@@ -222,6 +254,31 @@ function renderWithRepeat(
     : "; rep from * to end";
 
   return { body, runs: [...beforeRuns, ...insideRuns, ...afterRuns] };
+}
+
+/**
+ * The shortest run of groups that, repeated, reproduces the whole sequence.
+ *
+ * Returns the input unchanged when it does not repeat cleanly — a partial
+ * final repeat would make the instruction wrong, and a wrong instruction is
+ * worse than a long one.
+ */
+function smallestPeriod(groups: CellGroup[]): CellGroup[] {
+  const n = groups.length;
+  if (n < 2) return groups;
+
+  const same = (a: CellGroup, b: CellGroup) =>
+    a.symbolId === b.symbolId && a.colorIndex === b.colorIndex && a.width === b.width;
+
+  for (let period = 1; period <= n / 2; period += 1) {
+    if (n % period !== 0) continue;
+    let holds = true;
+    for (let i = period; i < n && holds; i += 1) {
+      if (!same(groups[i], groups[i - period])) holds = false;
+    }
+    if (holds) return groups.slice(0, period);
+  }
+  return groups;
 }
 
 /**

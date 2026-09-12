@@ -204,7 +204,10 @@ describe("repeat boxes", () => {
     // RS reading order: k3 (cols 7..5 are outside on the right — col 5 is inside,
     // so the edge before the repeat is cols 7 and 6), then the box, then cols 1,0.
     expect(chartToInstructions(chart).rows[0].body).toBe(
-      "k2, *k1, p1, k1, p1; rep from * to last 2 sts, k2",
+      // The box collapses to its smallest repeating unit, which is how a
+      // pattern is actually written — "*k1, p1; rep from *", not the unit
+      // spelled out twice.
+      "k2, *k1, p1; rep from * to last 2 sts, k2",
     );
   });
 
@@ -216,7 +219,7 @@ describe("repeat boxes", () => {
     chart = unwrap(
       addRepeatBox(chart, { id: "r1", startCol: 0, endCol: 3, startRow: 0, endRow: 0 }),
     );
-    expect(chartToInstructions(chart).rows[0].body).toBe("*p1, k1, p1, k1; rep from * to end");
+    expect(chartToInstructions(chart).rows[0].body).toBe("*p1, k1; rep from * to end");
   });
 });
 
@@ -241,5 +244,67 @@ describe("crochet", () => {
     expect(row.stitchesBefore).toBe(5);
     expect(row.stitchesAfter).toBe(3);
     expect(row.body).toBe("2 sc, cl");
+  });
+});
+
+describe("a chart that is only a repeat window", () => {
+  /** 2x2 rib across 12 stitches, with a repeat box over the whole row. */
+  function ribWindow() {
+    let chart = createChart({ id: "w", craft: "knitting", width: 12, height: 2 });
+    for (let row = 0; row < 2; row += 1) {
+      const filled = fillRow(chart, row, ["p", "p", "k", "k", "p", "p", "k", "k", "p", "p", "k", "k"]);
+      if (!filled.ok) throw new Error(filled.error.message);
+      chart = filled.value;
+    }
+    const boxed = addRepeatBox(chart, {
+      id: "panel", startCol: 0, endCol: 11, startRow: 0, endRow: 1,
+    });
+    if (!boxed.ok) throw new Error(boxed.error.message);
+    return boxed.value;
+  }
+
+  it("collapses the box to its smallest repeating unit", () => {
+    // Without this a 2x2 rib prints p2,k2 three times inside the asterisks —
+    // and thirty times on a real 60-stitch panel.
+    const row = chartToInstructions(ribWindow()).rows[0];
+    // A right-side row reads RIGHT to left, so a row charted p,p,k,k,... is
+    // worked k2, p2.
+    expect(row.body).toBe("*k2, p2; rep from * to end");
+  });
+
+  it("states the piece's real stitch count, not the window's", () => {
+    // A chart is clipped to an editable width, so a 106-stitch back charted at
+    // 60 would otherwise say "cast on 60" and make a garment half the width.
+    const written = chartToInstructions(ribWindow(), { totalStitches: 106 });
+    expect(written.castOn).toBe(106);
+    expect(written.castOnText).toContain("106");
+    expect(written.rows[0].text).toContain("(106 sts)");
+    expect(written.rows[0].stitchesAfter).toBe(106);
+  });
+
+  it("refuses to rescale a chart that shapes", () => {
+    // Scaling is only sound on a plain panel. A chart with a decrease has its
+    // own counts and rewriting them would be a lie.
+    let chart = createChart({ id: "s", craft: "knitting", width: 4, height: 2 });
+    const filled = fillRow(chart, 0, ["k", "k", "k", "k"]);
+    if (!filled.ok) throw new Error(filled.error.message);
+    chart = filled.value;
+    const shaped = fillRow(chart, 1, ["k2tog", "k", "k"]);
+    if (!shaped.ok) throw new Error(shaped.error.message);
+
+    const written = chartToInstructions(shaped.value, { totalStitches: 100 });
+    expect(written.rows[1].stitchesAfter).not.toBe(100);
+  });
+
+  it("leaves a row alone when it does not repeat cleanly", () => {
+    let chart = createChart({ id: "u", craft: "knitting", width: 5, height: 1 });
+    const filled = fillRow(chart, 0, ["k", "p", "k", "p", "k"]);
+    if (!filled.ok) throw new Error(filled.error.message);
+    const boxed = addRepeatBox(filled.value, {
+      id: "b", startCol: 0, endCol: 4, startRow: 0, endRow: 0,
+    });
+    if (!boxed.ok) throw new Error(boxed.error.message);
+    // 5 is not a multiple of any shorter period here, so nothing is collapsed.
+    expect(chartToInstructions(boxed.value).rows[0].body).toContain("k");
   });
 });

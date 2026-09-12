@@ -102,7 +102,10 @@ export function assemblePattern(input: AssembleInput): Pattern {
       if (!abbreviationMap.has(entry.abbr)) abbreviationMap.set(entry.abbr, entry.meaning);
     }
 
-    const written = chartToInstructions(chart);
+    // The chart is clipped to an editable window, so the piece's real stitch
+    // count has to come from the panel or the pattern says "cast on 60" for a
+    // 106-stitch back.
+    const written = chartToInstructions(chart, { totalStitches: piece.panel.stitches });
     const instructions: Instruction[] = [
       { rowNumber: 0, text: written.castOnText },
       ...written.rows.map((row) => ({ rowNumber: row.rowNumber, text: row.text })),
