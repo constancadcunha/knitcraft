@@ -3,25 +3,27 @@
 import { useMemo, useState } from "react";
 import {
   CRAFT_LABEL,
+  DIFFICULTY_LABELS,
   LEARN_CRAFTS,
   countsByCraft,
+  isWritten,
   lessonsForCraft,
+  photoForLesson,
   searchLessons,
-  type Lesson,
   type LearnCraft,
+  type LearnEntry,
 } from "@/lib/learn/content";
 import { learnDiagram } from "@/lib/learn/diagrams";
-import { diagramFor } from "@/lib/diagrams";
+import { creditLine, diagramFor } from "@/lib/diagrams";
 import { Choice } from "@/components/ui/Field";
 import { EmptyState, Heading, Tag } from "@/components/ui/Bits";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/cn";
 
-/** Resolve a lesson's artwork. Stitches and topics come from different sets. */
-function diagramSvg(lesson: Lesson): string | null {
-  if (lesson.kind === "topic") return learnDiagram(lesson.id) ?? null;
-  const resolved = diagramFor(lesson.id);
-  return resolved.svg || null;
+/** A lesson's drawing. Diagrams come from two sets depending on its origin. */
+function diagramSvg(lesson: LearnEntry): string | null {
+  if (lesson.diagram.source === "learn") return learnDiagram(lesson.diagram.id) ?? null;
+  return diagramFor(lesson.diagram.id).svg || null;
 }
 
 export default function LearnPage() {
@@ -35,15 +37,12 @@ export default function LearnPage() {
     [craft, query]
   );
 
-  const stitches = lessons.filter((l) => l.kind === "stitch");
-  const topics = lessons.filter((l) => l.kind === "topic");
-
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
       <Heading
         eyebrow="Stitch library"
         title="Learn the stitches"
-        description="Every stitch and technique drawn by hand, so the picture always matches the words."
+        description="Photographs of the real fabric, drawings of the hand movement, and the mistakes a first attempt actually makes."
       />
 
       <div className="mt-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -75,60 +74,26 @@ export default function LearnPage() {
       </div>
 
       {lessons.length === 0 ? (
-        <EmptyState
-          title="Nothing matches that"
-          description={`No ${CRAFT_LABEL[craft].toLowerCase()} lesson mentions “${query}”.`}
-          action={<Button variant="secondary" onClick={() => setQuery("")}>Clear search</Button>}
-        />
+        <div className="mt-10">
+          <EmptyState
+            title="Nothing matches that"
+            description={`No ${CRAFT_LABEL[craft].toLowerCase()} lesson mentions “${query}”.`}
+            action={<Button variant="secondary" onClick={() => setQuery("")}>Clear search</Button>}
+          />
+        </div>
       ) : (
-        <>
-          {stitches.length > 0 && (
-            <Section title="Stitches" count={stitches.length}>
-              {stitches.map((lesson) => (
-                <LessonCard
-                  key={lesson.id}
-                  lesson={lesson}
-                  open={open === lesson.id}
-                  onToggle={() => setOpen((id) => (id === lesson.id ? null : lesson.id))}
-                />
-              ))}
-            </Section>
-          )}
-
-          {topics.length > 0 && (
-            <Section title="Techniques & reference" count={topics.length}>
-              {topics.map((lesson) => (
-                <LessonCard
-                  key={lesson.id}
-                  lesson={lesson}
-                  open={open === lesson.id}
-                  onToggle={() => setOpen((id) => (id === lesson.id ? null : lesson.id))}
-                />
-              ))}
-            </Section>
-          )}
-        </>
+        <ul className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {lessons.map((lesson) => (
+            <LessonCard
+              key={`${lesson.craft}-${lesson.id}`}
+              lesson={lesson}
+              open={open === lesson.id}
+              onToggle={() => setOpen((id) => (id === lesson.id ? null : lesson.id))}
+            />
+          ))}
+        </ul>
       )}
     </div>
-  );
-}
-
-function Section({
-  title,
-  count,
-  children,
-}: {
-  title: string;
-  count: number;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="mt-10">
-      <h2 className="label mb-4 text-ink-faint">
-        {title} · {count}
-      </h2>
-      <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{children}</ul>
-    </section>
   );
 }
 
@@ -137,74 +102,166 @@ function LessonCard({
   open,
   onToggle,
 }: {
-  lesson: Lesson;
+  lesson: LearnEntry;
   open: boolean;
   onToggle: () => void;
 }) {
+  const photo = photoForLesson(lesson);
   const svg = diagramSvg(lesson);
 
   return (
     <li className={cn("panel flex flex-col", open && "sm:col-span-2 lg:col-span-3")}>
-      {/* The artwork is clipped by .media, never by the card itself — clipping
-          the card cuts its shadow and crops the drawing on hover. */}
-      {svg && (
-        <div
-          className="diagram-tile h-44 border-b-[3px] border-ink bg-panel-sunk p-3 text-ink"
-          // Diagrams are our own generated SVG strings, not user input.
-          dangerouslySetInnerHTML={{ __html: svg }}
-        />
-      )}
+      {/*
+        The whole card is the control — clicking anywhere opens it. It is a
+        <button> so it is reachable by keyboard and announces its state, and
+        the expanded body sits outside it because a button may not contain
+        interactive children like the source links.
+      */}
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="group flex flex-1 flex-col text-left"
+      >
+        {photo ? (
+          // A photograph of the real fabric. `.media` clips it, never the card.
+          <span className="media block h-44 border-b-[3px] border-ink">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={photo.url}
+              alt={photo.depicts}
+              loading="lazy"
+              className="transition-transform duration-200 group-hover:scale-[1.04]"
+            />
+          </span>
+        ) : svg ? (
+          <span
+            className="diagram-tile block h-44 border-b-[3px] border-ink bg-panel-sunk p-3 text-ink"
+            dangerouslySetInnerHTML={{ __html: svg }}
+          />
+        ) : null}
 
-      <div className="flex flex-1 flex-col gap-2.5 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <h3 className="label text-ink">{lesson.name}</h3>
-          {lesson.kind === "stitch" && <Tag tone="gold">{lesson.abbreviation}</Tag>}
+        <span className="flex flex-1 flex-col gap-2.5 p-4">
+          <span className="flex flex-wrap items-start justify-between gap-2">
+            <span className="label text-ink">{lesson.name}</span>
+            <span className="flex shrink-0 gap-1.5">
+              {lesson.abbreviation && <Tag tone="gold">{lesson.abbreviation}</Tag>}
+              <Tag tone="neutral">{DIFFICULTY_LABELS[lesson.difficulty]}</Tag>
+            </span>
+          </span>
+
+          <span className="block text-sm text-ink-soft">{lesson.summary}</span>
+
+          <span className="label mt-auto pt-1 text-berry">
+            {open ? "Close ▲" : "Read more ▼"}
+          </span>
+        </span>
+      </button>
+
+      {open && (
+        <div className="space-y-4 border-t-[3px] border-ink p-4">
+          {svg && photo && (
+            <div className="diagram-tile h-44 border-[3px] border-ink bg-panel-sunk p-3 text-ink"
+              dangerouslySetInnerHTML={{ __html: svg }}
+            />
+          )}
+
+          {lesson.appearance && (
+            <Section title="What it looks like">{lesson.appearance}</Section>
+          )}
+          {lesson.useFor && <Section title="Use it for">{lesson.useFor}</Section>}
+
+          {lesson.steps.length > 0 && (
+            <div>
+              <h4 className="label mb-2 text-ink-faint">How to work it</h4>
+              <ol className="space-y-2">
+                {lesson.steps.map((step) => (
+                  <li key={step.n} className="flex gap-3">
+                    <span className="label grid h-6 w-6 shrink-0 place-items-center border-[3px] border-ink bg-gold text-ink">
+                      {step.n}
+                    </span>
+                    <span className="min-w-0 pt-0.5">
+                      <span className="block text-sm text-ink">{step.text}</span>
+                      {step.note && (
+                        <span className="mt-1 block text-tiny text-ink-faint">{step.note}</span>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+
+          {lesson.pitfalls && lesson.pitfalls.length > 0 && (
+            <div>
+              <h4 className="label mb-2 text-berry">What goes wrong</h4>
+              <ul className="space-y-1.5">
+                {lesson.pitfalls.map((pitfall) => (
+                  <li key={pitfall} className="border-l-[3px] border-berry pl-3 text-sm text-ink-soft">
+                    {pitfall}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {lesson.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {lesson.tags.map((tag) => (
+                <Tag key={tag} tone="neutral">{tag}</Tag>
+              ))}
+            </div>
+          )}
+
+          {photo && (
+            <p className="text-tiny text-ink-faint">
+              Photo:{" "}
+              <a
+                href={photo.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline underline-offset-2 hover:text-berry"
+              >
+                {creditLine(photo)}
+              </a>
+            </p>
+          )}
+
+          {lesson.sources.length > 0 && (
+            <p className="text-tiny text-ink-faint">
+              Checked against:{" "}
+              {lesson.sources.map((source, i) => (
+                <span key={source}>
+                  {i > 0 && ", "}
+                  <a
+                    href={source}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline underline-offset-2 hover:text-berry"
+                  >
+                    {new URL(source).hostname.replace(/^www\./, "")}
+                  </a>
+                </span>
+              ))}
+            </p>
+          )}
+
+          {!isWritten(lesson) && (
+            <p className="text-tiny text-ink-faint">
+              This one is a reference card; the full written lesson is still to come.
+            </p>
+          )}
         </div>
-
-        {lesson.kind === "stitch" ? (
-          <>
-            <p className="text-sm text-ink-soft">{lesson.appearance}</p>
-            {open && (
-              <div className="mt-1 space-y-3 border-t-[3px] border-ink pt-3">
-                <div>
-                  <h4 className="label text-ink-faint">Use it for</h4>
-                  <p className="mt-1 text-sm text-ink-soft">{lesson.useFor}</p>
-                </div>
-                <div>
-                  <h4 className="label text-ink-faint">How to work it</h4>
-                  <p className="mt-1 text-sm text-ink">{lesson.tutorial}</p>
-                </div>
-                <a
-                  className="label inline-block text-cobalt underline underline-offset-4"
-                  href={`https://www.youtube.com/results?search_query=${encodeURIComponent(lesson.videoQuery)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Find a video →
-                </a>
-              </div>
-            )}
-          </>
-        ) : (
-          <ul className={cn("space-y-1.5", !open && "line-clamp-3")}>
-            {(open ? lesson.points : lesson.points.slice(0, 2)).map((point, i) => (
-              <li key={i} className="text-sm text-ink-soft">
-                {point}
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <Button
-          size="sm"
-          variant={open ? "secondary" : "quiet"}
-          className="mt-auto self-start"
-          onClick={onToggle}
-          aria-expanded={open}
-        >
-          {open ? "Close" : "Read more"}
-        </Button>
-      </div>
+      )}
     </li>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <h4 className="label mb-1 text-ink-faint">{title}</h4>
+      <p className="text-sm text-ink">{children}</p>
+    </div>
   );
 }

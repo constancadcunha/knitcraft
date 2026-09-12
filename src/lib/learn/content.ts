@@ -1,16 +1,19 @@
 /**
  * The Learn section's content index.
  *
- * Assembled from two sources that already exist and are tested:
- *   - STITCH_LIBRARY in src/lib/craftKnowledge: 31 stitches with real teaching
- *     text (appearance, what it is for, how to work it)
- *   - src/lib/learn/diagrams: 53 hand-drawn pixel diagrams covering techniques,
- *     reference tables, and the whole cross-stitch curriculum
+ * Three sources, in order of richness:
+ *   1. `entries/` — fully written lessons: numbered steps, prerequisites,
+ *      pitfalls, sources. This is the real curriculum.
+ *   2. `diagrams.ts` — 53 hand-drawn pixel diagrams covering techniques and
+ *      reference topics, including the whole cross-stitch syllabus. Where no
+ *      written entry exists yet, the diagram and its captions still teach.
+ *   3. `craftKnowledge.ts` — the legacy stitch list, used only for crafts that
+ *      have no written entries yet.
  *
  * Every image is drawn by us. The photographs the old page used are gone: ~20
- * were CC BY shown with no attribution and 12 were hotlinked from an
- * all-rights-reserved site, and 45 slots resolved to only 28 distinct files —
- * so a knitted slipped stitch was illustrated with a crochet photograph.
+ * were CC BY shown with no attribution, 12 were hotlinked from an
+ * all-rights-reserved site, and 45 slots resolved to 28 files — so a knitted
+ * slipped stitch was illustrated with a crochet photograph.
  */
 
 import { STITCH_LIBRARY } from "@/lib/craftKnowledge";
@@ -19,8 +22,12 @@ import {
   learnDiagramCaption,
   learnDiagramTitle,
 } from "@/lib/learn/diagrams";
+import { KNITTING_ENTRIES } from "@/lib/learn/entries/knitting";
+import { photoCredit, type PhotoCredit } from "@/lib/diagrams";
+import type { LearnCraft, LearnEntry } from "@/lib/learn/types";
 
-export type LearnCraft = "knitting" | "crocheting" | "cross-stitch";
+export type { LearnCraft, LearnEntry } from "@/lib/learn/types";
+export { DIFFICULTY_LABELS, DIFFICULTIES } from "@/lib/learn/types";
 
 export const LEARN_CRAFTS: readonly LearnCraft[] = [
   "knitting",
@@ -42,69 +49,121 @@ function craftOfDiagram(id: string): LearnCraft | null {
   return null;
 }
 
-export interface StitchLesson {
-  kind: "stitch";
-  id: string;
-  craft: LearnCraft;
-  name: string;
-  abbreviation: string;
-  appearance: string;
-  useFor: string;
-  tutorial: string;
-  videoQuery: string;
-}
+/** The crafts that already have fully written lessons. */
+const WRITTEN: Record<LearnCraft, readonly LearnEntry[]> = {
+  knitting: KNITTING_ENTRIES,
+  crocheting: [],
+  "cross-stitch": [],
+};
 
-export interface TopicLesson {
-  kind: "topic";
-  id: string;
-  craft: LearnCraft;
-  name: string;
-  /** Caption lines from the diagram, used as the lesson body. */
-  points: readonly string[];
-}
-
-export type Lesson = StitchLesson | TopicLesson;
-
-const STITCH_LESSONS: StitchLesson[] = STITCH_LIBRARY.map((entry) => ({
-  kind: "stitch",
-  id: entry.id,
-  craft: entry.craftType as LearnCraft,
-  name: entry.name,
-  abbreviation: entry.abbreviation,
-  appearance: entry.appearance,
-  useFor: entry.useFor,
-  tutorial: entry.tutorial,
-  videoQuery: entry.videoQuery,
-}));
-
-const TOPIC_LESSONS: TopicLesson[] = LEARN_DIAGRAM_IDS.flatMap((id) => {
-  const craft = craftOfDiagram(id);
+/**
+ * A lesson built from a diagram alone: the title and captions the diagram was
+ * drawn with. Less than a written entry, but accurate and never a placeholder.
+ */
+function fromDiagram(id: string, craft: LearnCraft): LearnEntry | null {
   const name = learnDiagramTitle(id);
-  if (!craft || !name) return [];
-  return [{ kind: "topic", id, craft, name, points: learnDiagramCaption(id) ?? [] }];
-});
+  if (!name) return null;
+  const points = learnDiagramCaption(id) ?? [];
+  return {
+    id,
+    craft,
+    kind: "reference",
+    name,
+    summary: points[0] ?? name,
+    appearance: "",
+    useFor: "",
+    difficulty: "beginner",
+    tags: [],
+    prerequisites: [],
+    related: [],
+    steps: points.map((text, i) => ({ n: i + 1, text })),
+    diagram: { source: "learn", id },
+    sources: [],
+  };
+}
 
-export const ALL_LESSONS: readonly Lesson[] = [...STITCH_LESSONS, ...TOPIC_LESSONS];
+/** A lesson built from the legacy stitch list, for crafts not yet rewritten. */
+function fromLegacy(entry: (typeof STITCH_LIBRARY)[number]): LearnEntry {
+  return {
+    id: entry.id,
+    craft: entry.craftType as LearnCraft,
+    kind: "stitch",
+    name: entry.name,
+    abbreviation: entry.abbreviation,
+    summary: entry.appearance,
+    appearance: entry.appearance,
+    useFor: entry.useFor,
+    difficulty: "beginner",
+    tags: [],
+    prerequisites: [],
+    related: [],
+    steps: [{ n: 1, text: entry.tutorial }],
+    diagram: { source: "stitch", id: entry.id },
+    sources: [],
+  };
+}
 
-export function lessonsForCraft(craft: LearnCraft): Lesson[] {
+function buildAll(): LearnEntry[] {
+  const out: LearnEntry[] = [];
+  const seen = new Set<string>();
+
+  const take = (entry: LearnEntry | null) => {
+    if (!entry) return;
+    const key = `${entry.craft}:${entry.id}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(entry);
+  };
+
+  for (const craft of LEARN_CRAFTS) for (const entry of WRITTEN[craft]) take(entry);
+
+  // Legacy stitches only fill crafts with nothing written yet, so a rewritten
+  // knitting lesson is never shadowed by its thinner predecessor.
+  for (const entry of STITCH_LIBRARY) {
+    const craft = entry.craftType as LearnCraft;
+    if (WRITTEN[craft]?.length) continue;
+    take(fromLegacy(entry));
+  }
+
+  for (const id of LEARN_DIAGRAM_IDS) {
+    const craft = craftOfDiagram(id);
+    if (craft) take(fromDiagram(id, craft));
+  }
+
+  return out;
+}
+
+export const ALL_LESSONS: readonly LearnEntry[] = buildAll();
+
+export function lessonsForCraft(craft: LearnCraft): LearnEntry[] {
   return ALL_LESSONS.filter((lesson) => lesson.craft === craft);
 }
 
-/** Free-text search across names, abbreviations and body text. */
-export function searchLessons(lessons: readonly Lesson[], query: string): Lesson[] {
+export function lessonById(id: string): LearnEntry | undefined {
+  return ALL_LESSONS.find((lesson) => lesson.id === id);
+}
+
+/** Free-text search across names, abbreviations, aka, tags and body text. */
+export function searchLessons(
+  lessons: readonly LearnEntry[],
+  query: string
+): LearnEntry[] {
   const needle = query.trim().toLowerCase();
   if (!needle) return [...lessons];
   return lessons.filter((lesson) => {
-    if (lesson.name.toLowerCase().includes(needle)) return true;
-    if (lesson.kind === "stitch") {
-      return (
-        lesson.abbreviation.toLowerCase().includes(needle) ||
-        lesson.appearance.toLowerCase().includes(needle) ||
-        lesson.useFor.toLowerCase().includes(needle) ||
-        lesson.tutorial.toLowerCase().includes(needle)
-      );
-    }
-    return lesson.points.some((p) => p.toLowerCase().includes(needle));
+    const haystack = [
+      lesson.name,
+      lesson.abbreviation ?? "",
+      lesson.summary,
+      lesson.appearance,
+      lesson.useFor,
+      ...(lesson.aka ?? []),
+      ...lesson.tags,
+      ...lesson.steps.map((s) => s.text),
+    ]
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(needle);
   });
 }
 
@@ -114,4 +173,68 @@ export function countsByCraft(): Record<LearnCraft, number> {
     crocheting: lessonsForCraft("crocheting").length,
     "cross-stitch": lessonsForCraft("cross-stitch").length,
   };
+}
+
+/** True when a lesson carries the full written treatment rather than captions. */
+export function isWritten(lesson: LearnEntry): boolean {
+  return lesson.sources.length > 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Photographs                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A lesson's photograph, when one exists.
+ *
+ * A drawing shows a hand movement exactly; only a photograph shows how real
+ * yarn behaves. So both are used: the photo is the hero and the diagram
+ * explains the motion beneath it.
+ *
+ * Every photo comes from the curated, licence-verified set and is rendered with
+ * its credit line — the old page showed ~20 CC BY images with no attribution
+ * at all, which is what made them a problem, not the photographs themselves.
+ */
+const PHOTO_KEYS: Record<string, string> = {
+  // knitting
+  knit: "knit-purl-anatomy",
+  purl: "knit-purl-anatomy",
+  stockinette: "stockinette",
+  garter: "garter",
+  ribbing: "ribbing",
+  cable: "cable",
+  "cable-stitch": "cable",
+  brioche: "brioche",
+  "stranded-colourwork": "stranded-colourwork",
+  colourwork: "stranded-colourwork",
+  "fair-isle": "stranded-colourwork",
+  lace: "lace",
+  "yarn-over": "yarn-over",
+  yo: "yarn-over",
+  "short-rows": "short-rows",
+  "slipped-stitch": "slipped-stitch",
+  "slip-stitch": "slipped-stitch",
+  "picking-up-stitches": "picking-up-stitches",
+  grafting: "grafting",
+  kitchener: "grafting",
+  "reading-flat-charts": "knit-chart-symbols",
+  "reading-charts": "knit-chart-symbols",
+  // crochet
+  "granny-square": "granny-square",
+  "v-stitch": "v-stitch",
+  "working-in-the-round": "working-in-the-round",
+  "foundation-chain": "foundation-chain",
+  chain: "foundation-chain",
+  "c-us-uk-terms": "crochet-terms-us-uk",
+  "c-spiral-vs-joined": "working-in-the-round",
+  "c-join-as-you-go": "granny-square",
+  "c-foundation-single": "foundation-chain",
+  "k-kitchener": "grafting",
+  "k-dropped-stitch": "slipped-stitch-mistake",
+  "k-abbreviations": "knit-chart-symbols",
+};
+
+export function photoForLesson(lesson: LearnEntry): PhotoCredit | undefined {
+  const key = PHOTO_KEYS[lesson.id];
+  return key ? photoCredit(key) : undefined;
 }
