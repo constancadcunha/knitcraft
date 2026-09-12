@@ -20,6 +20,16 @@ import { ribDepthCm, wearerScale } from "./catalog";
 import type { GarmentContext } from "./context";
 import type { GarmentKind } from "./types";
 
+/**
+ * How a piece begins.
+ *
+ * Every piece used to be written as "cast on N", which told a hat knitter to
+ * cast on twice — once for the brim and again for the body that continues out
+ * of it — and told them to cast on a neckband that is picked up from an
+ * existing edge. All three starts are different operations.
+ */
+export type PieceStart = "cast-on" | "continue" | "pick-up";
+
 export interface Panel {
   readonly name: string;
   readonly stitches: number;
@@ -30,6 +40,10 @@ export interface Panel {
   /** What the panel measures, for the schematic. */
   readonly widthCm: number;
   readonly heightCm: number;
+  /** Defaults to "cast-on". */
+  readonly start?: PieceStart;
+  /** The piece this one continues out of, or is picked up from. */
+  readonly from?: string;
   readonly note?: string;
 }
 
@@ -41,7 +55,13 @@ function panel(
   name: string,
   widthCm: number,
   heightCm: number,
-  options: { worked?: "flat" | "round"; edgeCm?: number; note?: string } = {}
+  options: {
+    worked?: "flat" | "round";
+    edgeCm?: number;
+    note?: string;
+    start?: PieceStart;
+    from?: string;
+  } = {}
 ): Panel {
   const stitches = ctx.sts(widthCm);
   const rows = ctx.rowCount(heightCm);
@@ -53,6 +73,8 @@ function panel(
     edgeRows: options.edgeCm ? ctx.rowCount(options.edgeCm) : undefined,
     widthCm: ctx.widthOf(stitches),
     heightCm: ctx.heightOf(rows),
+    start: options.start ?? "cast-on",
+    from: options.from,
     note: options.note,
   };
 }
@@ -86,6 +108,8 @@ export function panelsFor(ctx: GarmentContext, kind: GarmentKind): Panel[] {
               panel(ctx, "Left front", halfChest / 2, bodyLength, { edgeCm: hemCm }),
               panel(ctx, "Right front", halfChest / 2, bodyLength, { edgeCm: hemCm }),
               panel(ctx, "Button band", 3, bodyLength, {
+                start: "pick-up",
+                from: "the front edge",
                 note: "Worked along the front edge; length is the front edge, not a panel height.",
               }),
             ]
@@ -95,7 +119,11 @@ export function panelsFor(ctx: GarmentContext, kind: GarmentKind): Panel[] {
         ...front,
         panel(ctx, "Left sleeve", b.upperArm, sleeveLength, { edgeCm: cuffCm }),
         panel(ctx, "Right sleeve", b.upperArm, sleeveLength, { edgeCm: cuffCm }),
-        panel(ctx, "Neckband", b.neckCircumference, 5, { worked: "round" }),
+        panel(ctx, "Neckband", b.neckCircumference, 5, {
+          worked: "round",
+          start: "pick-up",
+          from: "the neckline",
+        }),
       ];
     }
 
@@ -104,8 +132,12 @@ export function panelsFor(ctx: GarmentContext, kind: GarmentKind): Panel[] {
       return [
         panel(ctx, "Back", halfChest, b.totalLength, { edgeCm: hemCm }),
         panel(ctx, "Front", halfChest, b.totalLength, { edgeCm: hemCm }),
-        panel(ctx, "Neckband", b.neckCircumference, 4, { worked: "round" }),
-        panel(ctx, "Armhole bands", b.armholeDepth * 2, 4, { worked: "round" }),
+        panel(ctx, "Neckband", b.neckCircumference, 4, {
+          worked: "round", start: "pick-up", from: "the neckline",
+        }),
+        panel(ctx, "Armhole bands", b.armholeDepth * 2, 4, {
+          worked: "round", start: "pick-up", from: "each armhole",
+        }),
       ];
 
     case "hat":
@@ -114,6 +146,8 @@ export function panelsFor(ctx: GarmentContext, kind: GarmentKind): Panel[] {
         panel(ctx, "Brim", b.headCircumference * SNUG, brimCm, { worked: "round" }),
         panel(ctx, "Body", b.headCircumference * SNUG, b.headCircumference * 0.32, {
           worked: "round",
+          start: "continue",
+          from: "Brim",
           note: "Crown decreases begin at the top of this panel.",
         }),
       ];
@@ -141,10 +175,18 @@ export function panelsFor(ctx: GarmentContext, kind: GarmentKind): Panel[] {
       const circumference = b.footCircumference * SNUG;
       return [
         panel(ctx, "Cuff", circumference, cuffCm, { worked: "round" }),
-        panel(ctx, "Leg", circumference, 15, { worked: "round" }),
-        panel(ctx, "Heel flap", circumference / 2, b.footLength * 0.22),
-        panel(ctx, "Foot", circumference, b.footLength * 0.7, { worked: "round" }),
-        panel(ctx, "Toe", circumference, b.footLength * 0.18, { worked: "round" }),
+        panel(ctx, "Leg", circumference, 15, {
+          worked: "round", start: "continue", from: "Cuff",
+        }),
+        panel(ctx, "Heel flap", circumference / 2, b.footLength * 0.22, {
+          start: "continue", from: "Leg",
+        }),
+        panel(ctx, "Foot", circumference, b.footLength * 0.7, {
+          worked: "round", start: "continue", from: "Heel flap",
+        }),
+        panel(ctx, "Toe", circumference, b.footLength * 0.18, {
+          worked: "round", start: "continue", from: "Foot",
+        }),
       ];
     }
 
@@ -152,8 +194,12 @@ export function panelsFor(ctx: GarmentContext, kind: GarmentKind): Panel[] {
       const circumference = b.handCircumference * SNUG;
       return [
         panel(ctx, "Cuff", circumference, cuffCm, { worked: "round" }),
-        panel(ctx, "Hand", circumference, b.handCircumference * 0.85, { worked: "round" }),
-        panel(ctx, "Thumb", circumference * 0.28, b.handCircumference * 0.3, { worked: "round" }),
+        panel(ctx, "Hand", circumference, b.handCircumference * 0.85, {
+          worked: "round", start: "continue", from: "Cuff",
+        }),
+        panel(ctx, "Thumb", circumference * 0.28, b.handCircumference * 0.3, {
+          worked: "round", start: "pick-up", from: "the held gusset stitches",
+        }),
       ];
     }
 
@@ -161,10 +207,16 @@ export function panelsFor(ctx: GarmentContext, kind: GarmentKind): Panel[] {
       const circumference = b.handCircumference * SNUG;
       return [
         panel(ctx, "Cuff", circumference, cuffCm, { worked: "round" }),
-        panel(ctx, "Hand", circumference, b.handCircumference * 0.6, { worked: "round" }),
-        panel(ctx, "Thumb", circumference * 0.28, b.handCircumference * 0.3, { worked: "round" }),
+        panel(ctx, "Hand", circumference, b.handCircumference * 0.6, {
+          worked: "round", start: "continue", from: "Cuff",
+        }),
+        panel(ctx, "Thumb", circumference * 0.28, b.handCircumference * 0.3, {
+          worked: "round", start: "pick-up", from: "the held gusset stitches",
+        }),
         panel(ctx, "Fingers", circumference * 0.25, b.handCircumference * 0.35, {
           worked: "round",
+          start: "pick-up",
+          from: "the held hand stitches",
           note: "Each finger is worked on roughly a quarter of the hand stitches.",
         }),
       ];

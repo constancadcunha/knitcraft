@@ -23,8 +23,12 @@ describe("assemblePattern", () => {
     for (const section of p.sections) {
       expect(section.name).toBeTruthy();
       expect(section.instructions.length).toBeGreaterThan(1);
-      // The first line is always the cast-on.
-      expect(section.instructions[0].text.toLowerCase()).toMatch(/cast on|chain|foundation/);
+      // The first line says how the piece begins, and there are three
+      // legitimate answers: cast on, continue from live stitches, or pick up
+      // from an existing edge.
+      expect(section.instructions[0].text.toLowerCase()).toMatch(
+        /cast on|chain|foundation|continue from|pick up/
+      );
     }
   });
 
@@ -97,5 +101,53 @@ describe("assemblePattern", () => {
     });
     expect(p.notes).toContain("variegated");
     expect(p.gauge).toEqual(GAUGE);
+  });
+});
+
+describe("each piece begins the way it actually begins", () => {
+  function sectionsOf(garment: string) {
+    const p = pattern(garment, garment === "Hat" ? "M" : "M");
+    return Object.fromEntries(p.sections.map((s) => [s.name, s.instructions[0].text]));
+  }
+
+  it("casts on a piece that genuinely starts fresh", () => {
+    const s = sectionsOf("Sweater");
+    expect(s.Back).toMatch(/^Cast on \d+/);
+    expect(s.Front).toMatch(/^Cast on \d+/);
+  });
+
+  it("continues a hat's body out of its brim rather than casting on twice", () => {
+    // Writing "cast on" here tells the knitter to start a second hat.
+    const s = sectionsOf("Hat");
+    expect(s.Brim).toMatch(/^Cast on \d+/);
+    expect(s.Body).toMatch(/^Continue from Brim/);
+    expect(s.Body).not.toMatch(/Cast on/);
+  });
+
+  it("picks a neckband up from the neckline", () => {
+    const s = sectionsOf("Sweater");
+    expect(s.Neckband).toMatch(/pick up and knit \d+ stitches evenly from the neckline/);
+    expect(s.Neckband).not.toMatch(/Cast on/);
+  });
+
+  it("walks a sock down from its cuff", () => {
+    const s = sectionsOf("Socks");
+    expect(s.Cuff).toMatch(/^Cast on \d+/);
+    expect(s.Leg).toMatch(/^Continue from Cuff/);
+    expect(s.Foot).toMatch(/^Continue from Heel flap/);
+  });
+
+  it("picks a glove's fingers up from the held stitches", () => {
+    const s = sectionsOf("Gloves");
+    expect(s.Fingers).toMatch(/pick up/i);
+    expect(s.Thumb).toMatch(/pick up/i);
+  });
+
+  it("states the live stitch count when continuing, so it can be checked", () => {
+    const p = pattern("Hat");
+    const body = p.sections.find((s) => s.name === "Body")!;
+    const brim = p.sections.find((s) => s.name === "Brim")!;
+    const count = brim.instructions[0].text.match(/\d+/)?.[0];
+    expect(body.instructions[0].text).toContain(count!);
   });
 });

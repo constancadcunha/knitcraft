@@ -238,11 +238,23 @@ function renderWithRepeat(
 
   if (inside.length === 0) return renderPlain(groups, side, options);
 
+  // A box covering the WHOLE row with no shorter period inside it is not a
+  // repeat at all — "*…; rep from * to end" would mean "work this once". Say
+  // it plainly instead of dressing a single pass up as a repeat.
+  const collapsible = smallestPeriod(inside);
+  if (
+    before.length === 0 &&
+    after.length === 0 &&
+    collapsible.length === inside.length
+  ) {
+    return renderPlain(groups, side, options);
+  }
+
   const beforeRuns = compress(before, side);
   // A box spanning the whole row means "this fabric repeats", not "print every
   // stitch between the asterisks". Reduce it to its smallest repeating unit, or
   // a 2x2 rib across 60 stitches prints p2,k2 thirty times inside the repeat.
-  const insideRuns = compress(smallestPeriod(inside), side);
+  const insideRuns = compress(collapsible, side);
   const afterRuns = compress(after, side);
 
   const remaining = afterRuns.reduce((sum, run) => sum + run.consumed, 0);

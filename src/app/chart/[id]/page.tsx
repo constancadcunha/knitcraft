@@ -3,7 +3,7 @@
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
-import { chartGeometry } from "@/lib/project/geometry";
+import { chartGeometry, rowIndexForNumber } from "@/lib/project/geometry";
 import {
   decrement,
   gotoRow,
@@ -16,13 +16,19 @@ import {
   undoLabel,
 } from "@/lib/project/progress";
 import ChartView from "@/components/chart/ChartView";
+import RowCloseUp from "@/components/tracker/RowCloseUp";
+import InstructionBrowser from "@/components/tracker/InstructionBrowser";
+import {
+  panelStitchesFromChart,
+  rowsFromChart,
+  rowsFromWrittenInstructions,
+} from "@/components/tracker/instructionSections";
 import CrossStitchView from "@/components/chart/CrossStitchView";
 import ChartLegend from "@/components/chart/ChartLegend";
 import VoiceCounter from "@/components/VoiceCounter";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Panel } from "@/components/ui/Panel";
 import { EmptyState, Heading, Loading, Meter, Stat, Tag } from "@/components/ui/Bits";
-import { chartToInstructions } from "@/lib/chart";
 import { isCrossStitchChart, type SavedChart } from "@/types";
 import { cn } from "@/lib/cn";
 
@@ -56,6 +62,28 @@ export default function TrackerPage(props: { params: Promise<{ id: string }> }) 
   // Zoom lives with the reader, not with the project: how close you hold the
   // phone is not a property of the pattern.
   const [zoom, setZoom] = useState<number>(0);
+
+  /**
+   * The written rows for this piece.
+   *
+   * Preferred source is the project's own stored pattern: it was assembled from
+   * this very chart by `assemblePattern`, which knew the piece's REAL stitch
+   * count (a chart is clipped to a 60-stitch editing window, so regenerating
+   * from the grid alone would say "cast on 60" for a 106-stitch back). A
+   * project made in the chart editor has no written pattern, so there we
+   * regenerate and recover the true width from the panel repeat box the engine
+   * labelled.
+   */
+  const book = useMemo(() => {
+    const chart = saved?.chart;
+    if (!chart || isCrossStitchChart(chart)) return null;
+    const section = project?.pattern?.sections.find((s) => s.chartId === chart.id);
+    if (section && section.instructions.length > 1) {
+      return rowsFromWrittenInstructions(section.instructions);
+    }
+    const totalStitches = panelStitchesFromChart(chart);
+    return rowsFromChart(chart, totalStitches ? { totalStitches } : {});
+  }, [saved, project]);
 
   const apply = useCallback(
     (change: Parameters<typeof store.mutateChartProgress>[2]) => {
@@ -92,8 +120,14 @@ export default function TrackerPage(props: { params: Promise<{ id: string }> }) 
   const stitchChart = isCrossStitchChart(chart) ? chart : null;
   const yarnChart = isCrossStitchChart(chart) ? null : chart;
 
-  const instruction = yarnChart
-    ? chartToInstructions(yarnChart).rows.find((r) => r.rowNumber === view.rowNumber)?.text
+  // The row being worked, in words. Taken from the same book the reader below
+  // is browsing, so the panel, the voice counter and the section list can never
+  // quote three different versions of one row.
+  const currentRow = book?.rows.find((r) => r.rowNumber === view.rowNumber);
+  const instruction = currentRow
+    ? `${currentRow.label}: ${currentRow.body}.${
+        currentRow.stitchesAfter !== null ? ` (${currentRow.stitchesAfter} sts)` : ""
+      }`
     : undefined;
 
   const percent = Math.round(view.fraction * 100);
@@ -155,6 +189,26 @@ export default function TrackerPage(props: { params: Promise<{ id: string }> }) 
             onResetRow={() => apply((p) => setCount(geometry, p, 0))}
             onUndo={() => apply((p) => undo(p))}
           />
+
+          {yarnChart && (
+            <Panel
+              title="This row, stitch by stitch"
+              accent="berry"
+              bodyClassName="p-3 sm:p-4"
+              action={
+                <Tag tone="neutral">
+                  Row {view.rowNumber} of {view.totalRows}
+                </Tag>
+              }
+            >
+              <RowCloseUp
+                chart={yarnChart}
+                rowIndex={view.rowIndex}
+                stitchesDone={view.stitchesDone}
+                onSelectStitch={(before) => apply((p) => setCount(geometry, p, before))}
+              />
+            </Panel>
+          )}
 
           <Panel
             title="Chart"
@@ -235,7 +289,7 @@ export default function TrackerPage(props: { params: Promise<{ id: string }> }) 
           />
 
           <Panel
-            title="Rows"
+            title={book ? "The instructions" : "Rows"}
             accent="fern"
             bodyClassName="p-3 sm:p-4"
             action={
@@ -244,12 +298,37 @@ export default function TrackerPage(props: { params: Promise<{ id: string }> }) 
               </Tag>
             }
           >
-            <RowList
-              rows={geometry.rows}
-              progress={progress}
-              currentRow={view.rowNumber}
-              onToggle={(rowIndex) => apply((p) => toggleRow(geometry, p, rowIndex))}
-            />
+            {book ? (
+              /* Written rows, broken into phases with their own navigation —
+                 183 rows in one list is a wall nobody can hold their place in. */
+              <InstructionBrowser
+                book={book}
+                activeRow={view.rowNumber}
+                listHeightClass="max-h-[24rem]"
+                isRowWorked={(rowNumber) => {
+                  const rowIndex = rowIndexForNumber(geometry, rowNumber);
+                  if (rowIndex === null) return false;
+                  const row = geometry.rows[rowIndex];
+                  return (
+                    !!row && row.count > 0 && stitchesDoneInRow(progress, rowIndex) >= row.count
+                  );
+                }}
+                onToggleRow={(rowNumber) => {
+                  const rowIndex = rowIndexForNumber(geometry, rowNumber);
+                  if (rowIndex !== null) apply((p) => toggleRow(geometry, p, rowIndex));
+                }}
+                onGotoRow={(rowNumber) => apply((p) => gotoRow(geometry, p, rowNumber))}
+              />
+            ) : (
+              /* A cross-stitch design has no written rows to break up: the
+                 picture IS the instruction, so the plain row ledger stands. */
+              <RowList
+                rows={geometry.rows}
+                progress={progress}
+                currentRow={view.rowNumber}
+                onToggle={(rowIndex) => apply((p) => toggleRow(geometry, p, rowIndex))}
+              />
+            )}
           </Panel>
         </div>
       </div>

@@ -105,9 +105,25 @@ export function assemblePattern(input: AssembleInput): Pattern {
     // The chart is clipped to an editable window, so the piece's real stitch
     // count has to come from the panel or the pattern says "cast on 60" for a
     // 106-stitch back.
-    const written = chartToInstructions(chart, { totalStitches: piece.panel.stitches });
+    const start = piece.panel.start ?? "cast-on";
+    // Only a piece that genuinely starts fresh is cast on. A hat's body
+    // continues out of its brim, and a neckband is picked up from an existing
+    // edge — writing "cast on" for those tells the knitter to start a second
+    // piece that should never exist.
+    const written = chartToInstructions(chart, {
+      totalStitches: piece.panel.stitches,
+      includeCastOn: start === "cast-on",
+    });
+
+    const opening =
+      start === "cast-on"
+        ? written.castOnText
+        : start === "continue"
+          ? `Continue from ${piece.panel.from ?? "the previous piece"} with the ${piece.panel.stitches} live stitches.`
+          : `With the right side facing, pick up and knit ${piece.panel.stitches} stitches evenly from ${piece.panel.from ?? "the edge"}.`;
+
     const instructions: Instruction[] = [
-      { rowNumber: 0, text: written.castOnText },
+      { rowNumber: 0, text: opening },
       ...written.rows.map((row) => ({ rowNumber: row.rowNumber, text: row.text })),
     ];
 

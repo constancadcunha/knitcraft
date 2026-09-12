@@ -1,12 +1,15 @@
 "use client";
 
-import { use, useMemo } from "react";
+import { use, useMemo, useState } from "react";
 import Link from "next/link";
 import { useStore } from "@/lib/store";
-import { ButtonLink } from "@/components/ui/Button";
+import { Button, ButtonLink } from "@/components/ui/Button";
 import { EmptyState, Heading, Loading, SectionHeading, Tag } from "@/components/ui/Bits";
 import { Panel } from "@/components/ui/Panel";
-import { CRAFT_LABELS, type Project } from "@/types";
+import InstructionBrowser from "@/components/tracker/InstructionBrowser";
+import { rowsFromWrittenInstructions } from "@/components/tracker/instructionSections";
+import { CRAFT_LABELS, type ChartProgress, type PatternSection, type Project } from "@/types";
+import { cn } from "@/lib/cn";
 
 export default function PatternPage(props: { params: Promise<{ id: string }> }) {
   const { id } = use(props.params);
@@ -167,40 +170,13 @@ function PatternBody({ project }: { project: Project }) {
 
       {pattern.sections.length > 0 && (
         <>
-          <SectionHeading className="mt-12" count={`${pattern.sections.length} sections`}>
+          <SectionHeading
+            className="mt-12"
+            count={`${pattern.sections.length} piece${pattern.sections.length === 1 ? "" : "s"}`}
+          >
             Making it
           </SectionHeading>
-          <div className="space-y-5">
-            {pattern.sections.map((section) => (
-              <Panel
-                key={section.name}
-                title={section.name}
-                accent="gold"
-                headingAs="h3"
-                bodyClassName="p-4 sm:p-5"
-              >
-                {section.description && (
-                  <p className="mb-4 text-sm text-ink-soft">{section.description}</p>
-                )}
-                <ol className="space-y-2.5">
-                  {section.instructions.map((instruction, i) => (
-                    <li
-                      key={i}
-                      className="flex gap-3 border-[3px] border-ink bg-panel p-3.5"
-                    >
-                      {/* A numbered step, so "where was I" has an answer. */}
-                      <span className="label shrink-0 pt-0.5 text-ink-faint tabular-nums">
-                        {String(i + 1).padStart(2, "0")}
-                      </span>
-                      <span className="min-w-0 text-sm leading-relaxed text-ink">
-                        {instruction.text}
-                      </span>
-                    </li>
-                  ))}
-                </ol>
-              </Panel>
-            ))}
-          </div>
+          <PieceReader project={project} sections={pattern.sections} />
         </>
       )}
 
@@ -223,4 +199,106 @@ function PatternBody({ project }: { project: Project }) {
       </p>
     </div>
   );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Making it — one piece at a time                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The instructions, navigable at two levels.
+ *
+ * A garment is pieces and a piece is phases, and a reader needs to move between
+ * both. Printing every row of every piece in one column — which is what this
+ * page used to do — is 700 lines of prose with no way back to your place. So:
+ * pick the piece here, and the browser inside breaks that piece into hem, body,
+ * shaping and edging with its own previous/next and jump-to-row.
+ */
+function PieceReader({
+  project,
+  sections,
+}: {
+  project: Project;
+  sections: PatternSection[];
+}) {
+  const [openIndex, setOpenIndex] = useState(0);
+  const index = Math.min(openIndex, sections.length - 1);
+  const section = sections[index];
+
+  const book = useMemo(
+    () => rowsFromWrittenInstructions(section.instructions),
+    [section]
+  );
+
+  // Where the maker actually is in this piece, if they have started it. The
+  // written pattern and the tracker are the same rows, so the page can say
+  // "you are here" without the reader having to hold it in their head. Stored
+  // row indices are 0-based; printed row numbers are not.
+  const tracked = section.chartId ? project.progress.charts[section.chartId] : undefined;
+  const activeRow = tracked && hasStarted(tracked) ? tracked.cursor.rowIndex + 1 : null;
+
+  return (
+    <div className="space-y-5">
+      <nav aria-label="Pieces">
+        <ul className="flex flex-wrap gap-2">
+          {sections.map((piece, i) => {
+            const current = i === index;
+            const started = hasStarted(
+              piece.chartId ? project.progress.charts[piece.chartId] : undefined
+            );
+            return (
+              <li key={piece.name}>
+                <Button
+                  size="sm"
+                  variant={current ? "primary" : "secondary"}
+                  aria-current={current ? "true" : undefined}
+                  onClick={() => setOpenIndex(i)}
+                >
+                  {started && (
+                    <span
+                      className={cn("h-2 w-2", current ? "bg-panel" : "bg-fern")}
+                      aria-hidden
+                    />
+                  )}
+                  {piece.name}
+                  <span className="opacity-70">
+                    {Math.max(0, piece.instructions.length - 1)} rows
+                  </span>
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
+
+      <Panel
+        title={section.name}
+        accent="gold"
+        headingAs="h3"
+        bodyClassName="p-4 sm:p-5"
+        action={
+          section.chartId ? (
+            <ButtonLink
+              href={`/chart/${project.id}?chart=${section.chartId}`}
+              size="sm"
+              variant="secondary"
+            >
+              Track this piece
+            </ButtonLink>
+          ) : undefined
+        }
+      >
+        {section.description && (
+          <p className="mb-4 text-sm text-ink-soft">{section.description}</p>
+        )}
+        <InstructionBrowser book={book} activeRow={activeRow} />
+      </Panel>
+    </div>
+  );
+}
+
+/** Has any work been done on this piece? A fresh tracker sits on row 1 untouched. */
+function hasStarted(progress: ChartProgress | undefined): boolean {
+  if (!progress) return false;
+  return progress.cursor.rowIndex > 0 || Object.keys(progress.rowStitches).length > 0;
 }
