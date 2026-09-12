@@ -5,18 +5,7 @@ import {
   photoForLesson,
   type LearnEntry,
 } from "../content";
-import { learnDiagram } from "../diagrams";
-import { diagramFor } from "@/lib/diagrams";
-
-/**
- * Mirrors the page's resolution exactly: an inexact diagram is a craft-level
- * generic, identical for every lesson that falls back to it, so it is dropped.
- */
-function artworkFor(lesson: LearnEntry): string | null {
-  if (lesson.diagram.source === "learn") return learnDiagram(lesson.diagram.id) ?? null;
-  const resolved = diagramFor(lesson.diagram.id);
-  return resolved.exact ? resolved.svg || null : null;
-}
+import { artworkFor, thumbnailFor } from "../artworkFor";
 
 describe("no lesson shows another lesson's picture", () => {
   // The reported bug: "half of the images are repeated". The old page resolved
@@ -35,7 +24,7 @@ describe("no lesson shows another lesson's picture", () => {
   it.each(LEARN_CRAFTS)("%s diagrams are one-to-one", (craft) => {
     const seen = new Map<string, string>();
     for (const lesson of lessonsForCraft(craft)) {
-      const svg = artworkFor(lesson);
+      const svg = thumbnailFor(lesson);
       if (!svg) continue;
       const clash = seen.get(svg);
       expect(clash, `${lesson.id} draws the same picture as ${clash}`).toBeUndefined();
@@ -56,6 +45,27 @@ describe("every photograph is usable", () => {
         expect(photo.sourceUrl, lesson.id).toMatch(/^https?:/);
         expect(photo.url, lesson.id).toMatch(/^https?:/);
       }
+    }
+  });
+});
+
+describe("every lesson has a picture of its own", () => {
+  it.each(LEARN_CRAFTS)("%s: nothing is left blank", (craft) => {
+    for (const lesson of lessonsForCraft(craft)) {
+      const hasArt = Boolean(photoForLesson(lesson)) || Boolean(artworkFor(lesson));
+      expect(hasArt, `${lesson.id} has no photo and no diagram`).toBe(true);
+    }
+  });
+
+  it("routes a technique lesson to its step sequence, not a generic swatch", () => {
+    // Five technique lessons were falling through to a craft-level generic
+    // because the resolver only knew stitch ids, so all five showed the same
+    // picture while a distinct step-by-step diagram already existed for each.
+    for (const id of ["bind-off", "gauge-swatch", "blocking", "mattress-seam", "patch-pockets"]) {
+      const lesson = lessonsForCraft("knitting").find((l) => l.id === id);
+      expect(lesson, id).toBeDefined();
+      const art = artworkFor(lesson as LearnEntry);
+      expect(art?.steps?.length, `${id} should have steps`).toBeGreaterThan(0);
     }
   });
 });

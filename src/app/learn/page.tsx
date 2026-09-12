@@ -12,27 +12,12 @@ import {
   type LearnCraft,
   type LearnEntry,
 } from "@/lib/learn/content";
-import { learnDiagram } from "@/lib/learn/diagrams";
-import { diagramFor } from "@/lib/diagrams";
+import { artworkFor, thumbnailFor } from "@/lib/learn/artworkFor";
 import { Choice } from "@/components/ui/Field";
 import { EmptyState, Heading, Tag } from "@/components/ui/Bits";
 import { Button } from "@/components/ui/Button";
 import LessonDialog from "@/components/LessonDialog";
 
-/**
- * A lesson's drawing, or null.
- *
- * `diagramFor` falls back to a craft-level generic when it has nothing
- * specific, and that fallback is the SAME picture for every lesson that hits
- * it — eight knitting techniques were all showing one fabric swatch. A
- * repeated picture teaches nothing and reads as a bug, so an inexact match is
- * dropped and the card simply has no image.
- */
-function diagramSvg(lesson: LearnEntry): string | null {
-  if (lesson.diagram.source === "learn") return learnDiagram(lesson.diagram.id) ?? null;
-  const resolved = diagramFor(lesson.diagram.id);
-  return resolved.exact ? resolved.svg || null : null;
-}
 
 export default function LearnPage() {
   const [craft, setCraft] = useState<LearnCraft>("knitting");
@@ -109,7 +94,7 @@ export default function LearnPage() {
       <LessonDialog
         lesson={openLesson}
         photo={openLesson ? photoForLesson(openLesson) : undefined}
-        diagram={openLesson ? diagramSvg(openLesson) : null}
+        artwork={openLesson ? artworkFor(openLesson) : null}
         onClose={() => setOpen(null)}
       />
     </div>
@@ -124,7 +109,7 @@ function LessonCard({
   onOpen: () => void;
 }) {
   const photo = photoForLesson(lesson);
-  const svg = diagramSvg(lesson);
+  const svg = thumbnailFor(lesson);
 
   return (
     <li className="panel lift flex flex-col">

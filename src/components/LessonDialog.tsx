@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { creditLine, type PhotoCredit } from "@/lib/diagrams";
 import { DIFFICULTY_LABELS, type LearnEntry } from "@/lib/learn/types";
+import type { LessonArtwork } from "@/lib/learn/artworkFor";
 import { Button } from "@/components/ui/Button";
 import { Tag } from "@/components/ui/Bits";
 
@@ -16,12 +17,12 @@ import { Tag } from "@/components/ui/Bits";
 export default function LessonDialog({
   lesson,
   photo,
-  diagram,
+  artwork,
   onClose,
 }: {
   lesson: LearnEntry | null;
   photo?: PhotoCredit;
-  diagram: string | null;
+  artwork: LessonArtwork | null;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -87,14 +88,34 @@ export default function LessonDialog({
               </figure>
             )}
 
-            {diagram && (
+            {artwork?.svg && (
               <figure>
                 <h3 className="label mb-2 text-ink-faint">How the stitch is formed</h3>
                 <div
                   className="diagram-tile h-56 border-[3px] border-ink bg-panel-sunk p-3"
-                  dangerouslySetInnerHTML={{ __html: diagram }}
+                  dangerouslySetInnerHTML={{ __html: artwork.svg }}
                 />
               </figure>
+            )}
+
+            {artwork?.steps && artwork.steps.length > 0 && (
+              <div>
+                <h3 className="label mb-2 text-ink-faint">Step by step</h3>
+                <ol className="grid gap-3 sm:grid-cols-2">
+                  {artwork.steps.map((step) => (
+                    <li key={step.n} className="border-[3px] border-ink bg-panel-sunk">
+                      <div
+                        className="diagram-tile h-40 p-3"
+                        dangerouslySetInnerHTML={{ __html: step.svg }}
+                      />
+                      <p className="border-t-[3px] border-ink bg-panel p-3 text-sm text-ink">
+                        <span className="label mr-1.5 text-ink-faint">{step.n}</span>
+                        {step.caption}
+                      </p>
+                    </li>
+                  ))}
+                </ol>
+              </div>
             )}
 
             {lesson.appearance && (
