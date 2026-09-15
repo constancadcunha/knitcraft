@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Local database (set STITCHCRAFT_DB_PATH to a persistent volume in production)
+/data/

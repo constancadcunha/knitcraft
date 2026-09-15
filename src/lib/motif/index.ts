@@ -86,6 +86,7 @@ function vocabulary(chart: SymbolChart) {
 function put(chart: SymbolChart, row: number, col: number, symbolId: string, colorIndex = 0) {
   const cells = chart.rows[row];
   if (!cells || col < 0 || col >= cells.length) return;
+  if (cells[col].symbolId && !["k", "p", "sc", "dc", "hdc", "fpdc", "bpdc"].includes(cells[col].symbolId!)) return;
   cells[col] = { colorIndex, symbolId };
 }
 

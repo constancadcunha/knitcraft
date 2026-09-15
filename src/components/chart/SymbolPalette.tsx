@@ -7,7 +7,6 @@ import {
   type StitchSymbol,
   type SymbolCategory,
 } from "@/lib/chart";
-import SymbolGlyph from "@/components/chart/SymbolGlyph";
 import { cn } from "@/lib/cn";
 
 /**
@@ -103,8 +102,7 @@ export default function SymbolPalette({
                       : "bg-panel hover:-translate-y-0.5 hover:bg-gold hover:shadow-pop-sm"
                   )}
                 >
-                  <SymbolGlyph symbol={symbol} size={18} />
-                  <span className="sr-only">
+                  <span className={active ? "text-panel" : "text-ink"}>
                     {symbol.abbreviation} {symbol.name}
                   </span>
                 </button>

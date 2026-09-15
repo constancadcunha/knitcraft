@@ -7,7 +7,7 @@ import { useWakeLock } from "@/hooks/useWakeLock";
 import type { VoiceCommand } from "@/lib/voice/parseCommand";
 import { describeSequence } from "@/lib/voice/stitchWords";
 import { checkSequence } from "@/lib/voice/checkSequence";
-import type { SymbolChart } from "@/lib/chart";
+import { rowGroupsInReadingOrder, rowSide, workedForm, type SymbolChart } from "@/lib/chart";
 import { Button } from "@/components/ui/Button";
 import { Meter, Tag } from "@/components/ui/Bits";
 import { cn } from "@/lib/cn";
@@ -44,7 +44,9 @@ const COMMANDS: Array<[string, string]> = [
   ["“knit, purl, knit”", "count each stitch named"],
   ["“knit two, purl two”", "count a run at a time"],
   ["“plus five”", "count five"],
-  ["“twenty four”", "set the count"],
+  ["“set count twenty four”", "set the count"],
+  ["“one, one”", "count two stitches"],
+  ["“set count eleven”", "set an exact count"],
   ["“next row”", "advance a row"],
   ["“row twelve”", "jump to a row"],
   ["“back one” / “undo”", "fix a miscount"],
@@ -165,7 +167,11 @@ export default function VoiceCounter({
           );
           break;
         case "readNext":
-          say(instruction ? instruction : `Row ${rowNumber}.`);
+          if (chart && rowIndex !== undefined) {
+            const side = rowSide(chart, rowIndex);
+            const steps = rowGroupsInReadingOrder(chart, rowIndex).filter(g => !g.symbol?.notWorked).map((g, i) => `Step ${i + 1}: ${g.symbol ? workedForm(g.symbol, side).instruction : "work stitch"}, colour ${g.colorIndex + 1}.`);
+            say(`Row ${rowNumber}. ${steps.join(" ")}`);
+          } else say(instruction ? instruction : `Row ${rowNumber}.`);
           break;
         case "repeat":
           speaker.repeat();
@@ -241,6 +247,7 @@ export default function VoiceCounter({
           </p>
         ) : null}
 
+        {voice.boostSupported && <label className="block space-y-2 text-sm"><span>Microphone boost · {voice.micLevel}×</span><input className="block w-full" type="range" min={1} max={5} step={.5} value={voice.micLevel} onChange={e => voice.setMicLevel(Number(e.target.value))} /><span className="block text-xs text-ink-soft">Raise this for a quiet voice or a microphone farther away.</span></label>}
         <Meter
           value={stitchesDone}
           max={stitchesInRow}

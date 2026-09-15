@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useId, useMemo } from "react";
 import {
   ART_CELL,
   NO_STITCH_ID,
@@ -61,6 +61,7 @@ export default function ChartView({
     [chart]
   );
 
+  const shapeClip = useId();
   const gutter = showRowNumbers ? GUTTER : 0;
   const boardW = chart.width * cellSize;
   const boardH = chart.height * cellSize;
@@ -133,7 +134,7 @@ export default function ChartView({
       })}
 
       {showGrid && (
-        <g pointerEvents="none">
+        <g pointerEvents="none" clipPath={`url(#${shapeClip})`}>
           {Array.from({ length: chart.width + 1 }, (_, i) => (
             <line
               key={`v${i}`}
@@ -226,7 +227,7 @@ function Group({
   const done = completed?.[`${rowIndex},${group.anchorCol}`];
   const colour = chart.colors[group.colorIndex] ?? chart.colors[0] ?? "transparent";
 
-  const rects = group.symbol ? symbolArtRects(group.symbol.art) : [];
+  const rects = group.symbol && !isNoStitch && cellSize >= 8 ? symbolArtRects(group.symbol.art) : [];
   const INK: Record<string, string> = {
     ink: "var(--color-ink)",
     accent: "var(--color-berry)",
@@ -235,27 +236,12 @@ function Group({
 
   return (
     <g
-      opacity={done ? 0.3 : 1}
+      opacity={done ? 0.55 : 1}
       onClick={onCellClick ? () => onCellClick(rowIndex, group.anchorCol) : undefined}
       style={onCellClick ? { cursor: "pointer" } : undefined}
     >
-      {isNoStitch ? (
-        // A no-stitch cell is not part of the fabric: leave it unfilled and
-        // hatch it so it never reads as a colour the knitter should work.
-        <g>
-          <rect x={x} y={y} width={width} height={cellSize} fill="var(--color-panel-sunk)" />
-          <line
-            x1={x}
-            y1={y + cellSize}
-            x2={x + width}
-            y2={y}
-            stroke="var(--color-ink-faint)"
-            strokeWidth={1.5}
-          />
-        </g>
-      ) : (
-        <rect x={x} y={y} width={width} height={cellSize} fill={colour} />
-      )}
+      <rect x={x} y={y} width={width} height={cellSize} fill={isNoStitch ? "transparent" : colour} />
+      {done && !isNoStitch && <path d={`M${x + cellSize * .18} ${y + cellSize * .5} l${cellSize * .22} ${cellSize * .22} l${cellSize * .4} ${-cellSize * .45}`} fill="none" stroke="var(--color-ink)" strokeWidth={Math.max(1, cellSize / 9)} />}
 
       {rects.map((r, i) => (
         <rect

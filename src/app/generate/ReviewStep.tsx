@@ -1,5 +1,6 @@
 "use client";
 
+import MaterialsChecklist from "@/components/MaterialsChecklist";
 import Link from "next/link";
 import ChartView from "@/components/chart/ChartView";
 import SymbolGlyph from "@/components/chart/SymbolGlyph";
@@ -56,7 +57,7 @@ export default function ReviewStep({ data }: { data: ReviewData }) {
         data.gaugeFromSwatch ? " (your swatch)" : " (estimated)"
       }`,
     ],
-    ["Skill", data.difficulty],
+    ["Estimated skill", data.difficulty],
     ["Design", data.designLine],
   ];
 
@@ -92,31 +93,12 @@ export default function ReviewStep({ data }: { data: ReviewData }) {
       )}
 
       <Panel title="What you'll need" accent="gold">
-        <ul className="space-y-3">
-          {yarn && (
-            <li className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-              <span className="label text-ink">{yarn.yarn.name}</span>
-              <span className="text-sm text-ink-soft">
-                about {yarn.metres} m — {yarn.balls} ball{yarn.balls === 1 ? "" : "s"} of{" "}
-                {yarn.yarn.gramsPerBall} g
-              </span>
-            </li>
-          )}
-          <li className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-            <span className="label text-ink">
-              {data.craft === "knitting" ? "Needles" : "Hook"}
-            </span>
-            <span className="text-sm text-ink-soft">{describeTool(data.toolMm, data.craft)}</span>
-          </li>
-          <li className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-            <span className="label text-ink">Notions</span>
-            <span className="text-sm text-ink-soft">{notionsFor(data).join(", ")}</span>
-          </li>
-          <li className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-            <span className="label text-ink">Time</span>
-            <span className="text-sm text-ink-soft">{data.pattern.estimatedTime}</span>
-          </li>
-        </ul>
+        <MaterialsChecklist scope="studio" items={[
+          ...(yarn ? [{ id: "yarn", label: yarn.yarn.name ?? "Yarn", detail: `About ${yarn.metres} m · ${yarn.balls} balls of ${yarn.yarn.gramsPerBall} g` }] : []),
+          { id: "tool", label: data.craft === "knitting" ? "Needles" : "Hook", detail: describeTool(data.toolMm, data.craft) },
+          ...notionsFor(data).map((label, i) => ({ id: `notion-${i}`, label })),
+        ]} />
+        <p className="mt-4 text-sm text-ink-soft">Estimated time: {data.pattern.estimatedTime}</p>
         <p className="mt-4 text-sm text-ink-soft">
           The yarn amount comes from the area of every piece at your gauge, plus the usual
           allowance. Buy the balls in one dye lot.

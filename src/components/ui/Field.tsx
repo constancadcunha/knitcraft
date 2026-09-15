@@ -106,7 +106,7 @@ export function SelectField({
     <Wrap id={id} label={label} hint={hint} error={error}>
       <select
         id={id}
-        className={cn("field", className)}
+        className={cn("field select-field", className)}
         aria-describedby={hint || error ? `${id}-hint` : undefined}
         {...rest}
       >

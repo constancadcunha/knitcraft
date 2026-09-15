@@ -1,6 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import ChartView from "@/components/chart/ChartView";
+import CrossStitchView from "@/components/chart/CrossStitchView";
+import { isCrossStitchChart } from "@/types";
 import Link from "next/link";
 import { useStore } from "@/lib/store";
 import { chartGeometry } from "@/lib/project/geometry";
@@ -62,13 +65,19 @@ function lastTouched(iso: string | null | undefined): string | null {
 
 export default function LibraryPage() {
   const store = useStore();
+  const [status, setStatus] = useState("all");
+  const [showPreviews, setShowPreviews] = useState(true);
   const [filter, setFilter] = useState<Filter>("all");
   const [confirming, setConfirming] = useState<string | null>(null);
 
   const projects = useMemo(() => {
     const list = store.projects.filter((p) => !p.archived);
-    return filter === "all" ? list : list.filter((p) => p.craftType === filter);
-  }, [store.projects, filter]);
+    const phase = (p: Project) => { const { done, total } = projectProgress(p); return done === 0 ? "started" : done >= total ? "finished" : "progress"; };
+    return list.filter(p => (filter === "all" || p.craftType === filter) && (status === "all" || phase(p) === status)).sort((a,b) => {
+      const priority = { progress: 0, started: 1, finished: 2 };
+      return priority[phase(a)] - priority[phase(b)] || b.updatedAt.localeCompare(a.updatedAt);
+    });
+  }, [store.projects, filter, status]);
 
   const total = store.projects.filter((p) => !p.archived).length;
 
@@ -77,7 +86,7 @@ export default function LibraryPage() {
       <Heading
         eyebrow="My library"
         title="Everything you're making"
-        description="Projects live in this browser only. Nothing is uploaded anywhere, so clearing site data clears these too."
+        description="Jump back into work in progress, or browse your new and finished projects. Saved to your database."
         action={
           <ButtonLink href="/generate" size="lg">
             New project
@@ -107,6 +116,8 @@ export default function LibraryPage() {
       )}
 
       <div className="mt-8">
+        <div className="mb-4"><Choice label="Project status" value={status} onChange={setStatus} options={[{ value: "all", label: "All" }, { value: "progress", label: "In progress" }, { value: "started", label: "Not started" }, { value: "finished", label: "Finished" }]} /></div>
+        <label className="flex items-center gap-3 mb-4"><input className="check" type="checkbox" checked={showPreviews} onChange={e => setShowPreviews(e.target.checked)} />Show project previews</label>
         <Choice label="Show" value={filter} options={FILTERS} onChange={setFilter} />
       </div>
 
@@ -118,7 +129,7 @@ export default function LibraryPage() {
               : undefined
           }
         >
-          Projects
+          Jump back in
         </SectionHeading>
 
         {!store.loaded ? (
@@ -154,6 +165,7 @@ export default function LibraryPage() {
 
               return (
                 <li key={project.id} className="panel flex flex-col">
+                  {showPreviews && firstChart && <Link href={`/chart/${project.id}?chart=${firstChart.id}`} aria-label={`Open ${project.name}`} className="chart-fit h-44 overflow-hidden border-b-2 border-ink bg-paper p-3">{isCrossStitchChart(firstChart.chart) ? <CrossStitchView chart={firstChart.chart} cellSize={4} /> : <ChartView chart={firstChart.chart} cellSize={4} showRowNumbers={false} />}</Link>}
                   <div className="flex items-start gap-3 border-b-[3px] border-ink p-4">
                     <GarmentIcon
                       type={project.garmentType}
@@ -236,7 +248,7 @@ export default function LibraryPage() {
                     </div>
                     {isConfirming && (
                       <p className="text-tiny text-berry" role="alert">
-                        Deleting is permanent — this project only exists here.
+                        This deletes the project from your library and database.
                       </p>
                     )}
                   </div>

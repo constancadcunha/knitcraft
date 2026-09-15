@@ -826,6 +826,22 @@ const CROCHET_SYMBOLS: StitchSymbol[] = [
     ]),
   },
   {
+    repeatStyle: "bracket-times", id: "sc-inc", craft: "crocheting", name: "Single crochet increase", abbreviation: "inc", category: "crochet-basic",
+    stitchesConsumed: 0, stitchesProduced: 1, width: 1,
+    instruction: "work one additional single crochet into the same stitch as the preceding single crochet",
+    rs: { abbr: "inc", instruction: "work one additional single crochet into the preceding stitch" },
+    ws: { abbr: "inc", instruction: "work one additional single crochet into the preceding stitch" },
+    art: art(["....#....", "....#....", "..#####..", "....#....", "....#....", ".........", ".........", ".........", "........."]),
+  },
+  {
+    repeatStyle: "bracket-times", id: "sc-dec", craft: "crocheting", name: "Single crochet two together", abbreviation: "sc2tog", category: "crochet-basic",
+    stitchesConsumed: 2, stitchesProduced: 1, width: 1,
+    instruction: "insert into the next stitch and pull up a loop, repeat in the following stitch, yarn over and pull through all three loops",
+    rs: { abbr: "sc2tog", instruction: "single crochet two stitches together" },
+    ws: { abbr: "sc2tog", instruction: "single crochet two stitches together" },
+    art: art([".#.....#.", "..#...#..", "...#.#...", "....#....", "....#....", "....#....", ".........", ".........", "........."]),
+  },
+  {
     id: "sc",
     craft: "crocheting",
     name: "Single crochet (UK: double crochet)",
@@ -1166,10 +1182,21 @@ const NEUTRAL_SYMBOLS: StitchSymbol[] = [
 // Registry
 // ---------------------------------------------------------------------------
 
+const CROCHET_SHAPING: StitchSymbol[] = ["hdc", "dc"].flatMap(id => {
+  const plain = CROCHET_SYMBOLS.find(s => s.id === id)!;
+  return ["inc", "dec"].map(operation => {
+    const increase = operation === "inc";
+    const instruction = increase ? `work one additional ${plain.name.toLowerCase()} into the preceding stitch` : `work the next two ${plain.name.toLowerCase()} stitches together`;
+    const abbr = increase ? `${id} inc` : `${id}2tog`;
+    return { ...plain, id: `${id}-${operation}`, name: `${plain.name} ${increase ? "increase" : "decrease"}`, abbreviation: abbr, stitchesConsumed: increase ? 0 : 2, stitchesProduced: 1, instruction, rs: { abbr, instruction }, ws: { abbr, instruction }, repeatStyle: "bracket-times" as const, art: CROCHET_SYMBOLS.find(s => s.id === `sc-${operation}`)!.art };
+  });
+});
+
 const ALL_SYMBOLS: StitchSymbol[] = [
   ...KNIT_SYMBOLS,
   ...CABLE_SYMBOLS,
   ...CROCHET_SYMBOLS,
+  ...CROCHET_SHAPING,
   ...NEUTRAL_SYMBOLS,
 ];
 

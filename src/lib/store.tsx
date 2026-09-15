@@ -1,6 +1,9 @@
 "use client";
 
+import SaveStatus from "@/components/SaveStatus";
 import { useCallback, useSyncExternalStore, type ReactNode } from "react";
+import { loadAccount, accountRecords, saveRecord } from "@/lib/account";
+import { parseProject } from "@/lib/project/validate";
 import type { ChartProgress, Project } from "@/types";
 import {
   deleteProject as deleteFromStorage,
@@ -45,6 +48,7 @@ const EMPTY: StoreSnapshot = {
 
 let snapshot: StoreSnapshot = EMPTY;
 const listeners = new Set<() => void>();
+let loading = false;
 
 function emit() {
   for (const listener of listeners) listener();
@@ -69,15 +73,16 @@ function subscribe(listener: () => void) {
  * happens here and then never again.
  */
 function getSnapshot(): StoreSnapshot {
-  if (!snapshot.loaded) {
-    const storage = getLocalStorage();
-    const result = loadProjects(storage);
-    snapshot = {
-      projects: result.projects,
-      loaded: true,
-      discardedNotice: result.discarded ? (result.discardedReason ?? null) : null,
-      storageError: result.error ?? null,
-    };
+  if (!snapshot.loaded && !loading) {
+    loading = true;
+    void loadAccount().then(async () => {
+      const remote = Object.entries(accountRecords()).filter(([k]) => k.startsWith("project.")).map(([,v]) => parseProject(v)).filter((p): p is Project => !!p);
+      const local = loadProjects(getLocalStorage());
+      const missing = accountRecords().migration ? [] : local.projects.filter(p => !remote.some(r => r.id === p.id));
+      for (const p of missing) await saveRecord(`project.${p.id}`, p);
+      if (!accountRecords().migration) await saveRecord("migration", true);
+      setSnapshot({ projects: [...remote, ...missing], loaded: true, storageError: null });
+    }).catch(e => { loading = false; setSnapshot({ storageError: { reason: "unavailable", message: e.message } }); });
   }
   return snapshot;
 }
@@ -88,19 +93,12 @@ function getServerSnapshot(): StoreSnapshot {
 
 function persist(projects: Project[], changed: Project | null, removedId?: string) {
   const storage = getLocalStorage();
-  const ids = projects.map((p) => p.id);
-  const result = changed
-    ? saveToStorage(storage, changed, ids)
-    : removedId
-      ? deleteFromStorage(storage, removedId, ids)
-      : { ok: true as const };
-
-  setSnapshot({
-    projects,
-    // A failed write must be visible: silently losing a project is the worst
-    // outcome for someone who has spent hours on it.
-    storageError: result.ok ? null : result.error,
-  });
+  const ids = projects.map(p => p.id);
+  if (changed) saveToStorage(storage, changed, ids);
+  if (removedId) deleteFromStorage(storage, removedId, ids);
+  setSnapshot({ projects });
+  const key = changed ? `project.${changed.id}` : removedId ? `project.${removedId}` : null;
+  if (key) void saveRecord(key, changed).then(() => setSnapshot({ storageError: null })).catch(e => setSnapshot({ storageError: { reason: "unavailable", message: e.message } }));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -172,7 +170,7 @@ export function dismissDiscardedNotice() {
  * itself no longer needs a context: any component can subscribe directly.
  */
 export function StoreProvider({ children }: { children: ReactNode }) {
-  return <>{children}</>;
+  return <><SaveStatus />{children}</>;
 }
 
 export interface StoreApi extends StoreSnapshot {

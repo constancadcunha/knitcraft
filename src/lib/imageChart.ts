@@ -61,10 +61,21 @@ export async function imagePreviewToChart(
     else buckets.set(key, { rgb: bucket, count: 1 });
   }
 
-  const paletteRgb = Array.from(buckets.values())
-    .sort((a, b) => b.count - a.count)
-    .slice(0, maxColors)
-    .map((entry) => entry.rgb);
+  // Choose distinct colours so a small red motif is not displaced by five
+  // nearly identical background shades. Frequency still favours real regions.
+  const candidates = [...buckets.values()].sort((a, b) => b.count - a.count);
+  const paletteRgb: [number, number, number][] = candidates.length ? [candidates[0].rgb] : [];
+  while (paletteRgb.length < maxColors && paletteRgb.length < candidates.length) {
+    let best: typeof candidates[number] | undefined;
+    let bestScore = 0;
+    for (const candidate of candidates) {
+      const distance = Math.min(...paletteRgb.map(p => p.reduce((sum, channel, i) => sum + (channel - candidate.rgb[i]) ** 2, 0)));
+      const score = distance * Math.sqrt(candidate.count);
+      if (score > bestScore) { bestScore = score; best = candidate; }
+    }
+    if (!best) break;
+    paletteRgb.push(best.rgb);
+  }
   if (!paletteRgb.length) paletteRgb.push([245, 237, 224]);
 
   const colors = paletteRgb.map(rgbToHex);

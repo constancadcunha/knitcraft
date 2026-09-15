@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { boostedMicrophone, canBoostMicrophone } from "@/lib/voice/microphone";
 import { useSupported } from "@/hooks/useSupported";
-import { parseCommand, type VoiceCommand } from "@/lib/voice/parseCommand";
+import { countingCommand } from "@/lib/voice/countingCommand";
+import { type VoiceCommand } from "@/lib/voice/parseCommand";
 import {
   getSpeechRecognition,
   type SpeechRecognitionErrorEvent,
@@ -38,6 +40,9 @@ interface Options {
  *  - The whole thing requires a secure context (https, or localhost).
  */
 export function useVoiceCounter({ onCommand, lang }: Options) {
+  const boostSupported = useSupported(canBoostMicrophone);
+  const [micLevel, setMicLevel] = useState(2);
+  const micRef = useRef<Awaited<ReturnType<typeof boostedMicrophone>> | null>(null);
   const recognitionSupported = useSupported(() => getSpeechRecognition() !== null);
   const [rawStatus, setStatus] = useState<VoiceStatus>("idle");
   const status: VoiceStatus = recognitionSupported ? rawStatus : "unsupported";
@@ -55,12 +60,14 @@ export function useVoiceCounter({ onCommand, lang }: Options) {
     onCommandRef.current = onCommand;
   }, [onCommand]);
 
+  useEffect(() => { micRef.current?.setLevel(micLevel); }, [micLevel]);
+
   const buildRecognition = useCallback(() => {
     const Ctor = getSpeechRecognition();
     if (!Ctor) return null;
 
     const recognition = new Ctor();
-    recognition.lang = lang ?? navigator.language ?? "en-US";
+    recognition.lang = lang ?? "en-US";
     recognition.continuous = true;
     // Interim results make short words like "one" register fast enough to
     // keep up with someone actually knitting.
@@ -73,6 +80,7 @@ export function useVoiceCounter({ onCommand, lang }: Options) {
     };
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
+      if (window.speechSynthesis?.speaking) return;
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
         const result = event.results[i];
         if (!result.isFinal) continue;
@@ -84,7 +92,7 @@ export function useVoiceCounter({ onCommand, lang }: Options) {
         let heard = "";
         for (let a = 0; a < result.length; a += 1) {
           const text = result[a].transcript;
-          const parsed = parseCommand(text);
+          const parsed = countingCommand(text);
           if (a === 0) heard = text;
           if (parsed) {
             command = parsed;
@@ -100,6 +108,7 @@ export function useVoiceCounter({ onCommand, lang }: Options) {
           // than making every consumer reach back into this hook to stop it.
           if (command.kind === "pause") {
             wantListeningRef.current = false;
+            micRef.current?.close(); micRef.current = null;
             try {
               recognition.stop();
             } catch {
@@ -115,6 +124,7 @@ export function useVoiceCounter({ onCommand, lang }: Options) {
       if (event.error === "not-allowed" || event.error === "service-not-allowed") {
         wantListeningRef.current = false;
         runningRef.current = false;
+        micRef.current?.close(); micRef.current = null;
         setStatus("denied");
         return;
       }
@@ -135,7 +145,7 @@ export function useVoiceCounter({ onCommand, lang }: Options) {
       restartTimerRef.current = setTimeout(() => {
         if (!wantListeningRef.current || runningRef.current) return;
         try {
-          recognition.start();
+          recognition.start(micRef.current?.track);
         } catch {
           setStatus("error");
         }
@@ -145,7 +155,7 @@ export function useVoiceCounter({ onCommand, lang }: Options) {
     return recognition;
   }, [lang]);
 
-  const start = useCallback(() => {
+  const start = useCallback(async () => {
     const Ctor = getSpeechRecognition();
     if (!Ctor) {
       setStatus("unsupported");
@@ -157,17 +167,25 @@ export function useVoiceCounter({ onCommand, lang }: Options) {
       return;
     }
 
+    if (wantListeningRef.current) return;
     wantListeningRef.current = true;
     if (!recognitionRef.current) recognitionRef.current = buildRecognition();
     if (runningRef.current) return;
 
     setStatus("starting");
     try {
-      recognitionRef.current?.start();
-    } catch {
-      // Already started — the onstart handler will settle the status.
+      if (canBoostMicrophone() && !micRef.current) {
+        const mic = await boostedMicrophone(micLevel);
+        if (!wantListeningRef.current) { mic.close(); return; }
+        micRef.current = mic;
+      }
+      recognitionRef.current?.start(micRef.current?.track);
+    } catch (error) {
+      wantListeningRef.current = false;
+      micRef.current?.close(); micRef.current = null;
+      setStatus(error instanceof DOMException && error.name === "NotAllowedError" ? "denied" : "error");
     }
-  }, [buildRecognition]);
+  }, [buildRecognition, micLevel]);
 
   const stop = useCallback(() => {
     wantListeningRef.current = false;
@@ -177,6 +195,7 @@ export function useVoiceCounter({ onCommand, lang }: Options) {
     } catch {
       // Not running.
     }
+    micRef.current?.close(); micRef.current = null;
     setStatus((s) => (s === "unsupported" || s === "denied" ? s : "idle"));
   }, []);
 
@@ -196,11 +215,12 @@ export function useVoiceCounter({ onCommand, lang }: Options) {
         // Already gone.
       }
       recognitionRef.current = null;
+      micRef.current?.close(); micRef.current = null;
     };
   }, []);
 
   const supported = status !== "unsupported";
   const listening = status === "listening" || status === "starting";
 
-  return { status, supported, listening, transcript, lastCommand, start, stop, toggle };
+  return { boostSupported, micLevel, setMicLevel, status, supported, listening, transcript, lastCommand, start, stop, toggle };
 }

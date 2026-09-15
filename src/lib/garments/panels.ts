@@ -16,6 +16,7 @@
  * is charted on. Shaping schedules live with the constructions.
  */
 
+import { torsoFit } from "./fit";
 import { ribDepthCm, wearerScale } from "./catalog";
 import type { GarmentContext } from "./context";
 import type { GarmentKind } from "./types";
@@ -70,7 +71,7 @@ function panel(
     stitches,
     rows,
     worked: options.worked ?? "flat",
-    edgeRows: options.edgeCm ? ctx.rowCount(options.edgeCm) : undefined,
+    edgeRows: options.edgeCm && ctx.options.ribbing !== false ? Math.min(rows, ctx.rowCount(options.edgeCm)) : 0,
     widthCm: ctx.widthOf(stitches),
     heightCm: ctx.heightOf(rows),
     start: options.start ?? "cast-on",
@@ -94,14 +95,15 @@ export function panelsFor(ctx: GarmentContext, kind: GarmentKind): Panel[] {
   const brimCm = ribDepthCm(scale, "brim");
 
   // Finished chest already includes the wearer's chosen ease.
-  const chest = ctx.body.chest;
+  const fit = ["sweater", "cardigan", "vest", "tankTop"].includes(kind) ? torsoFit(ctx, kind, "raglan") : null;
+  const chest = fit?.chestCm ?? ctx.body.chest;
   const halfChest = chest / 2;
 
   switch (kind) {
     case "sweater":
     case "cardigan": {
-      const bodyLength = b.totalLength;
-      const sleeveLength = b.sleeveLengthToUnderarm;
+      const bodyLength = fit!.bodyLengthCm;
+      const sleeveLength = fit!.sleeveLengthCm + fit!.armholeDepthCm;
       const front: Panel[] =
         kind === "cardigan"
           ? [
@@ -117,9 +119,9 @@ export function panelsFor(ctx: GarmentContext, kind: GarmentKind): Panel[] {
       return [
         panel(ctx, "Back", halfChest, bodyLength, { edgeCm: hemCm }),
         ...front,
-        panel(ctx, "Left sleeve", b.upperArm, sleeveLength, { edgeCm: cuffCm }),
-        panel(ctx, "Right sleeve", b.upperArm, sleeveLength, { edgeCm: cuffCm }),
-        panel(ctx, "Neckband", b.neckCircumference, 5, {
+        panel(ctx, "Left sleeve", fit!.upperArmCm, sleeveLength, { edgeCm: cuffCm }),
+        panel(ctx, "Right sleeve", fit!.upperArmCm, sleeveLength, { edgeCm: cuffCm }),
+        panel(ctx, "Neckband", 2 * fit!.neckWidthCm + 10, fit!.neckBandDepthCm, {
           worked: "round",
           start: "pick-up",
           from: "the neckline",
@@ -130,12 +132,12 @@ export function panelsFor(ctx: GarmentContext, kind: GarmentKind): Panel[] {
     case "vest":
     case "tankTop":
       return [
-        panel(ctx, "Back", halfChest, b.totalLength, { edgeCm: hemCm }),
-        panel(ctx, "Front", halfChest, b.totalLength, { edgeCm: hemCm }),
-        panel(ctx, "Neckband", b.neckCircumference, 4, {
+        panel(ctx, "Back", halfChest, fit!.bodyLengthCm, { edgeCm: hemCm }),
+        panel(ctx, "Front", halfChest, fit!.bodyLengthCm, { edgeCm: hemCm }),
+        panel(ctx, "Neckband", fit!.neckOpeningCm, fit!.neckBandDepthCm, {
           worked: "round", start: "pick-up", from: "the neckline",
         }),
-        panel(ctx, "Armhole bands", b.armholeDepth * 2, 4, {
+        panel(ctx, "Armhole bands", fit!.armholeDepthCm * 2, 3, {
           worked: "round", start: "pick-up", from: "each armhole",
         }),
       ];
@@ -143,7 +145,7 @@ export function panelsFor(ctx: GarmentContext, kind: GarmentKind): Panel[] {
     case "hat":
       // A hat must stretch onto the head, so it is drafted with negative ease.
       return [
-        panel(ctx, "Brim", b.headCircumference * SNUG, brimCm, { worked: "round" }),
+        panel(ctx, "Brim", b.headCircumference * SNUG, brimCm, { worked: "round", edgeCm: brimCm }),
         panel(ctx, "Body", b.headCircumference * SNUG, b.headCircumference * 0.32, {
           worked: "round",
           start: "continue",
@@ -174,7 +176,7 @@ export function panelsFor(ctx: GarmentContext, kind: GarmentKind): Panel[] {
     case "socks": {
       const circumference = b.footCircumference * SNUG;
       return [
-        panel(ctx, "Cuff", circumference, cuffCm, { worked: "round" }),
+        panel(ctx, "Cuff", circumference, cuffCm, { worked: "round", edgeCm: cuffCm }),
         panel(ctx, "Leg", circumference, 15, {
           worked: "round", start: "continue", from: "Cuff",
         }),
@@ -193,7 +195,7 @@ export function panelsFor(ctx: GarmentContext, kind: GarmentKind): Panel[] {
     case "mittens": {
       const circumference = b.handCircumference * SNUG;
       return [
-        panel(ctx, "Cuff", circumference, cuffCm, { worked: "round" }),
+        panel(ctx, "Cuff", circumference, cuffCm, { worked: "round", edgeCm: cuffCm }),
         panel(ctx, "Hand", circumference, b.handCircumference * 0.85, {
           worked: "round", start: "continue", from: "Cuff",
         }),
@@ -206,7 +208,7 @@ export function panelsFor(ctx: GarmentContext, kind: GarmentKind): Panel[] {
     case "gloves": {
       const circumference = b.handCircumference * SNUG;
       return [
-        panel(ctx, "Cuff", circumference, cuffCm, { worked: "round" }),
+        panel(ctx, "Cuff", circumference, cuffCm, { worked: "round", edgeCm: cuffCm }),
         panel(ctx, "Hand", circumference, b.handCircumference * 0.6, {
           worked: "round", start: "continue", from: "Cuff",
         }),

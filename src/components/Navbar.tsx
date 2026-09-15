@@ -10,6 +10,7 @@ const LINKS = [
   { href: "/chart-editor", label: "Charts" },
   { href: "/learn", label: "Learn" },
   { href: "/saved", label: "Library" },
+  { href: "/profile", label: "Profile" },
 ];
 
 export default function Navbar() {

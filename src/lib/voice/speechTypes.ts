@@ -47,7 +47,7 @@ export interface SpeechRecognitionLike extends EventTarget {
   continuous: boolean;
   interimResults: boolean;
   maxAlternatives: number;
-  start(): void;
+  start(audioTrack?: MediaStreamTrack): void;
   stop(): void;
   abort(): void;
   onresult: ((event: SpeechRecognitionEvent) => void) | null;

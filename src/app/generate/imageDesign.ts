@@ -72,7 +72,16 @@ export function exactChartForPiece(
   target: SymbolChart,
   options: { maxColoursPerRow: number }
 ): ExactChartResult {
-  const grid = resampleGrid(imported.grid, target.width, target.height);
+  // Fit inside the piece without stretching the motif into a different shape.
+  const sourceWidth = imported.grid[0]?.length ?? 1;
+  const sourceHeight = imported.grid.length || 1;
+  const scale = Math.min(target.width / sourceWidth, target.height / sourceHeight);
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+  const fitted = resampleGrid(imported.grid, width, height);
+  const left = Math.floor((target.width - width) / 2);
+  const top = Math.floor((target.height - height) / 2);
+  const grid = Array.from({ length: target.height }, (_, r) => Array.from({ length: target.width }, (_, c) => fitted[r - top]?.[c - left] ?? 0));
   const result = chartFromImage(
     { grid, colors: imported.colors.slice() },
     {
@@ -87,6 +96,7 @@ export function exactChartForPiece(
     ...result,
     chart: {
       ...result.chart,
+      rows: target.rows.map((row, r) => row.map((cell, c) => ({ ...cell, colorIndex: cell.symbolId === "nostitch" ? 0 : result.chart.rows[r][c].colorIndex }))),
       worked: target.worked,
       startSide: target.startSide,
       repeats: target.repeats.map((box) => ({ ...box })),

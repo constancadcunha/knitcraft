@@ -65,6 +65,8 @@ export interface PaletteEntry {
 }
 
 export interface DesignIntent {
+  motifGrid?: string[];
+  skillLevel?: "beginner" | "intermediate" | "advanced";
   name: string;
   motifKind: MotifKind;
   motifDescription: string;
@@ -212,12 +214,14 @@ export function coerceDesignIntent(
 
   return {
     name,
+    ...(["beginner", "intermediate", "advanced"].includes(String(value.skillLevel)) ? { skillLevel: value.skillLevel as "beginner" | "intermediate" | "advanced" } : {}),
     motifKind,
     motifDescription: asString(
       value.motifDescription ?? value.motif_description ?? value.motifDetail,
       "An allover repeat."
     ),
     palette: palette.slice(0, 6),
+    ...(Array.isArray(value.motifGrid) && value.motifGrid.length >= 4 && value.motifGrid.length <= 48 && value.motifGrid.every((r: unknown) => typeof r === "string" && r.length >= 4 && r.length <= 48 && r.length === (value.motifGrid as string[])[0].length && [...r].every(c => /^[0-5]$/.test(c) && Number(c) < Math.min(palette.length, 6))) ? { motifGrid: value.motifGrid as string[] } : {}),
     stitchPattern: asString(value.stitchPattern ?? value.stitch_pattern, "Stocking stitch"),
     construction,
     constructionNotes: constructionText || "Worked in pieces and seamed",
@@ -268,6 +272,7 @@ Return exactly this JSON shape:
 {
   "name": string,                 // an evocative pattern name, 2-4 words
   "motifKind": "colourwork" | "cable" | "lace" | "texture" | "plain",
+  "motifGrid": [string],          // for pictorial colourwork: a 24x24 pixel drawing of the requested object, top row first, digits indexing palette; 0 background. Draw the actual subject (e.g. lobster claws, tail and body), not stripes or alternating checks. Omit for plain/textured fabric.
   "motifDescription": string,     // what the motif looks like, one sentence
   "palette": [                    // 2-5 entries, ordered main colour first
     { "role": string, "hex": "#rrggbb", "name": string }
@@ -277,6 +282,7 @@ Return exactly this JSON shape:
                   | "worked-flat" | "in-the-round" | "motifs-joined",
   "garmentType": string,          // what this actually is, from the list below
   "size": string,                 // who it is for, from the size list below
+  "skillLevel": "beginner" | "intermediate" | "advanced", // estimate from techniques required, never an input preference
   "designerNotes": string         // one or two sentences of design advice
 }
 
@@ -325,7 +331,7 @@ export async function generateDesignIntent(input: {
     apiKey: input.apiKey,
     messages,
     hasImage: Boolean(input.imageBase64),
-    maxTokens: 900,
+    maxTokens: 1800,
   });
 
   if (!outcome.ok || outcome.value === undefined) {

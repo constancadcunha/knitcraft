@@ -16,13 +16,13 @@
 import {
   buildAbbreviationList,
   chartToInstructions,
+  castOnCount,
   type SymbolChart,
 } from "@/lib/chart";
 import {
   ballsFor,
   defaultYarnFor,
   estimateYarn,
-  rectangleAreaCm2,
   type CycWeight,
   type Gauge,
   type PieceArea,
@@ -78,7 +78,7 @@ export function assemblePattern(input: AssembleInput): Pattern {
 
   const areas: PieceArea[] = draft.pieces.map((piece) => ({
     name: piece.panel.name,
-    areaCm2: rectangleAreaCm2(piece.panel.widthCm, piece.panel.heightCm),
+    areaCm2: piece.chart.rows.reduce((sum, row) => sum + row.filter(c => c.symbolId !== "nostitch").length, 0) * 100 / (gauge.stitchesPer10cm * gauge.rowsPer10cm),
   }));
 
   const estimate = estimateYarn({ pieces: areas, gauge });
@@ -111,7 +111,7 @@ export function assemblePattern(input: AssembleInput): Pattern {
     // edge — writing "cast on" for those tells the knitter to start a second
     // piece that should never exist.
     const written = chartToInstructions(chart, {
-      totalStitches: piece.panel.stitches,
+      totalStitches: castOnCount(chart),
       includeCastOn: start === "cast-on",
     });
 

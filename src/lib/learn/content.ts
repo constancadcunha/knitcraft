@@ -97,9 +97,9 @@ function fromLegacy(entry: (typeof STITCH_LIBRARY)[number]): LearnEntry {
     tags: [],
     prerequisites: [],
     related: [],
-    steps: [{ n: 1, text: entry.tutorial }],
+    steps: entry.tutorial.split(/(?<=[.!?])\s+/).filter(Boolean).map((text, i) => ({ n: i + 1, text })),
     diagram: { source: "stitch", id: entry.id },
-    sources: [],
+    sources: entry.sourceUrl ? [entry.sourceUrl] : [],
   };
 }
 

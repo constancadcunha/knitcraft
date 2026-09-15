@@ -66,7 +66,7 @@ export default function Footer() {
       <div className="border-t-[3px] border-ink bg-panel-sunk">
         <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-6">
           <p className="label text-ink-soft">
-            Everything stays in your browser
+            Projects and progress saved to your database
           </p>
           <p className="label text-ink-faint">
             Stitch photos &copy; their authors, via Wikimedia Commons

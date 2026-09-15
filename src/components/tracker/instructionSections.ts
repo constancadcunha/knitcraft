@@ -225,16 +225,24 @@ function splitIntoSegments(rows: BrowsableRow[]): BrowsableRow[][] {
     const current = segments[segments.length - 1];
     const shapingSegment = current.some((r) => r.shaped);
 
-    const continues =
-      row.shaped === shapingSegment &&
-      (row.signature === rows[i - 1].signature ||
-        (i >= 2 && row.signature === rows[i - 2].signature));
-
-    if (continues) current.push(row);
+    if (row.shaped === shapingSegment && sameFabric(rows, i)) current.push(row);
     else segments.push([row]);
   }
 
   return segments;
+}
+
+/** Does row `i` read like the fabric immediately before it? */
+function sameFabric(rows: BrowsableRow[], i: number): boolean {
+  const signature = rows[i].signature;
+  if (signature === rows[i - 1].signature) return true;
+  // Established alternation: flat knitting repeats every two rows.
+  if (i >= 2 && signature === rows[i - 2].signature) return true;
+  // The SECOND row of a piece has nothing two rows back to compare with. It
+  // belongs with the first when the third row shows the fabric alternating
+  // (rib, seed stitch, stockinette) rather than having actually changed.
+  if (i === 1) return rows.length <= 2 || rows[2].signature === rows[0].signature;
+  return false;
 }
 
 function classify(

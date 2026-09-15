@@ -148,6 +148,9 @@ export function parseCommand(
 
   if (!text) return null;
 
+  // Repeated tallies are separate stitches, never a concatenated count.
+  if (/^(one|won|1)( (one|won|1))+$/.test(text)) return { kind: "increment", by: text.split(" ").length };
+
   for (const rule of RULES) {
     const m = text.match(rule.match);
     if (m) {

@@ -1,6 +1,8 @@
 "use client";
 
 import { use, useMemo, useState } from "react";
+import MaterialsChecklist from "@/components/MaterialsChecklist";
+import ProjectComments from "@/components/ProjectComments";
 import Link from "next/link";
 import { useStore } from "@/lib/store";
 import { Button, ButtonLink } from "@/components/ui/Button";
@@ -51,6 +53,12 @@ export default function PatternPage(props: { params: Promise<{ id: string }> }) 
         }
       />
 
+      {project.pattern && <div className="panel mt-6 p-5"><h2 className="label mb-4">What you’ll need</h2><MaterialsChecklist scope={project.id} items={[
+        ...project.pattern.materials.yarns.map((y, i) => ({ id: i === 0 ? "yarn" : `yarn-${i}`, label: y.yarn.name ?? "Yarn", detail: `${y.metres} m · ${y.balls} balls` })),
+        { id: "tool", label: project.craftType === "cross-stitch" ? "Embroidery needle" : project.craftType === "knitting" ? "Knitting needles" : "Crochet hook" },
+        { id: "notion-0", label: "Tapestry needle" }, { id: "notion-1", label: "Scissors" },
+      ]} /></div>}
+      <div className="mt-6"><ProjectComments projectId={project.id} /></div>
       {project.pattern ? (
         <PatternBody project={project} />
       ) : (

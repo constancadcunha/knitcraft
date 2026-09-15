@@ -111,6 +111,7 @@ export interface HatOptions {
 }
 
 export interface GarmentOptions {
+  readonly ribbing?: boolean;
   readonly cowl?: CowlOptions;
   readonly sleeve?: SleeveOptions;
   readonly cardigan?: CardiganOptions;

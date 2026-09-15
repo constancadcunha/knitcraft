@@ -1,5 +1,6 @@
 "use client";
 
+import { sourcedDiagram } from "@/lib/learn/media";
 import { useEffect, useRef } from "react";
 import { creditLine, type PhotoCredit } from "@/lib/diagrams";
 import { DIFFICULTY_LABELS, type LearnEntry } from "@/lib/learn/types";
@@ -25,6 +26,7 @@ export default function LessonDialog({
   artwork: LessonArtwork | null;
   onClose: () => void;
 }) {
+  const external = lesson ? sourcedDiagram(lesson) : null;
   const ref = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -88,7 +90,9 @@ export default function LessonDialog({
               </figure>
             )}
 
-            {artwork?.svg && (
+            {external && <figure><h3 className="label mb-2">Reference diagram</h3>{/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={external.url} alt={`${lesson.name} diagram`} className="w-full max-h-80 object-contain bg-white" /><figcaption className="text-xs mt-2"><a className="underline" href={external.source} target="_blank" rel="noreferrer">{external.credit}</a> · <a className="underline" href={external.licence}>Licence</a></figcaption></figure>}
+            {!external && artwork?.svg && (
               <figure>
                 <h3 className="label mb-2 text-ink-faint">How the stitch is formed</h3>
                 <div
@@ -98,7 +102,7 @@ export default function LessonDialog({
               </figure>
             )}
 
-            {artwork?.steps && artwork.steps.length > 0 && (
+            {!external && artwork?.steps && artwork.steps.length > 0 && (
               <div>
                 <h3 className="label mb-2 text-ink-faint">Step by step</h3>
                 <ol className="grid gap-3 sm:grid-cols-2">

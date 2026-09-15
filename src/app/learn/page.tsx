@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   CRAFT_LABEL,
   DIFFICULTY_LABELS,
@@ -12,28 +13,47 @@ import {
   type LearnCraft,
   type LearnEntry,
 } from "@/lib/learn/content";
-import { artworkFor, thumbnailFor } from "@/lib/learn/artworkFor";
+import { useAccount, updateProfile } from "@/lib/account";
+import { COURSES, LESSON_CHECKS } from "@/lib/learn/courses";
+import { cardPhoto } from "@/lib/learn/media";
+import { artworkFor } from "@/lib/learn/artworkFor";
 import { Choice } from "@/components/ui/Field";
 import { EmptyState, Heading, Tag } from "@/components/ui/Bits";
 import { Button } from "@/components/ui/Button";
 import LessonDialog from "@/components/LessonDialog";
 
 
-export default function LearnPage() {
-  const [craft, setCraft] = useState<LearnCraft>("knitting");
+export default function LearnPage() { return <Suspense fallback={<p className="p-8">Loading lessons…</p>}><LearnContent /></Suspense>; }
+
+function LearnContent() {
+  const params = useSearchParams();
+  const linkedId = params.get("lesson");
+  const linkedCraft = LEARN_CRAFTS.find(c => lessonsForCraft(c).some(l => l.id === linkedId));
+  const account = useAccount();
+  const [category, setCategory] = useState("all");
+  const [favouritesOnly, setFavouritesOnly] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(true);
+  const [practice, setPractice] = useState(false);
+  const [answer, setAnswer] = useState<number | null>(null);
+  const [craft, setCraft] = useState<LearnCraft>(linkedCraft ?? "knitting");
   const [query, setQuery] = useState("");
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(linkedId);
 
   const counts = useMemo(() => countsByCraft(), []);
   const lessons = useMemo(
-    () => searchLessons(lessonsForCraft(craft), query),
-    [craft, query]
+    () => searchLessons(lessonsForCraft(craft), query).filter(l => (category === "all" || l.kind === category) && (!favouritesOnly || account.profile.favourites.includes(l.id))),
+    [craft, query, category, favouritesOnly, account.profile.favourites]
   );
 
   const openLesson = useMemo(
-    () => lessons.find((l) => l.id === open) ?? null,
-    [lessons, open]
+    () => lessonsForCraft(craft).find((l) => l.id === open) ?? null,
+    [craft, open]
   );
+
+  const course = COURSES.find(c => c.craft === craft)!;
+  const courseLessons = course.lessons.map(id => lessonsForCraft(craft).find(l => l.id === id)).filter(l => !!l);
+  const check = openLesson ? LESSON_CHECKS[openLesson.id] : undefined;
+  const toggleFavourite = (id: string) => updateProfile({ favourites: account.profile.favourites.includes(id) ? account.profile.favourites.filter(v => v !== id) : [...account.profile.favourites, id] });
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
@@ -71,6 +91,17 @@ export default function LearnPage() {
         </div>
       </div>
 
+      <section className="panel mt-7 p-5 space-y-4">
+        <h2 className="font-ui text-lg">{course.name}</h2><p>Learn a skill, practise with your yarn, then check your understanding. Each completed lesson earns 10 practice XP.</p>
+        <ol className="flex flex-wrap gap-3">{courseLessons.map((lesson, i) => {
+          const complete = account.profile.completedLessons.includes(lesson.id);
+          const locked = i > 0 && !account.profile.completedLessons.includes(courseLessons[i - 1].id);
+          return <li key={lesson.id}><Button variant={complete ? "secondary" : "primary"} disabled={locked || !account.loaded} onClick={() => { setOpen(lesson.id); setPractice(true); setDialogOpen(true); setAnswer(null); }}>{complete ? "✓ " : `${i + 1}. `}{lesson.name}{locked ? " · locked" : ""}</Button></li>;
+        })}</ol>
+        {practice && openLesson && check && <div className="border-t-2 border-ink/20 pt-4 space-y-3"><p>After practising {openLesson.name.toLowerCase()}, check your understanding:</p><p className="font-medium">{check.practice}</p><p>{check.question}</p><div className="flex flex-wrap gap-2">{check.answers.map((a,i) => <Button key={a} variant="secondary" onClick={() => setAnswer(i)}>{a}</Button>)}</div>{answer !== null && answer !== check.correct && <p role="status">Try again — review the lesson and practise the movement.</p>}{answer === check.correct && <Button onClick={() => { updateProfile({ completedLessons: [...new Set([...account.profile.completedLessons, openLesson.id])] }); setPractice(false); setOpen(null); }}>I practised this lesson · complete</Button>}</div>}
+      </section>
+      <div className="mt-7 space-y-4"><Choice label="Browse lessons" value={category} onChange={setCategory} options={[{ value: "all", label: "Everything" }, { value: "technique", label: "How-tos" }, { value: "stitch", label: "Stitches" }, { value: "reference", label: "Tools & reference" }, { value: "concept", label: "Foundations" }]} /><label className="flex items-center gap-3"><input type="checkbox" className="check" checked={favouritesOnly} onChange={e => setFavouritesOnly(e.target.checked)} />Favourite lessons only</label></div>
+      {account.error && <p role="alert">{account.error}</p>}
       {lessons.length === 0 ? (
         <div className="mt-10">
           <EmptyState
@@ -85,17 +116,20 @@ export default function LearnPage() {
             <LessonCard
               key={`${lesson.craft}-${lesson.id}`}
               lesson={lesson}
-              onOpen={() => setOpen(lesson.id)}
+              favourite={account.profile.favourites.includes(lesson.id)}
+              onFavourite={() => toggleFavourite(lesson.id)}
+              ready={account.loaded}
+              onOpen={() => { setOpen(lesson.id); setPractice(false); setDialogOpen(true); }}
             />
           ))}
         </ul>
       )}
 
       <LessonDialog
-        lesson={openLesson}
+        lesson={dialogOpen ? openLesson : null}
         photo={openLesson ? photoForLesson(openLesson) : undefined}
         artwork={openLesson ? artworkFor(openLesson) : null}
-        onClose={() => setOpen(null)}
+        onClose={() => setDialogOpen(false)}
       />
     </div>
   );
@@ -104,12 +138,13 @@ export default function LearnPage() {
 function LessonCard({
   lesson,
   onOpen,
+  favourite, onFavourite, ready,
 }: {
   lesson: LearnEntry;
   onOpen: () => void;
+  favourite: boolean; onFavourite: () => void; ready: boolean;
 }) {
-  const photo = photoForLesson(lesson);
-  const svg = thumbnailFor(lesson);
+  const { photo, contextual } = cardPhoto(lesson);
 
   return (
     <li className="panel lift flex flex-col">
@@ -131,14 +166,8 @@ function LessonCard({
               className="transition-transform duration-200 group-hover:scale-[1.04]"
             />
           </span>
-        ) : svg ? (
-          <span
-            className="diagram-tile block h-44 border-b-[3px] border-ink bg-panel-sunk p-3 text-ink"
-            dangerouslySetInnerHTML={{ __html: svg }}
-          />
-        ) : (
-          <span className="dither block h-44 border-b-[3px] border-ink" aria-hidden />
-        )}
+        ) : null}
+        <span className="px-4 pt-2 text-xs text-ink-faint">{contextual ? "Craft example · " : ""}{photo.depicts}</span>
 
         <span className="flex flex-1 flex-col gap-2.5 p-4">
           <span className="flex flex-wrap items-start justify-between gap-2">
@@ -154,6 +183,8 @@ function LessonCard({
           <span className="label mt-auto pt-1 text-berry">Open lesson →</span>
         </span>
       </button>
+      <p className="px-4 pb-2 text-xs"><a className="underline" href={photo.sourceUrl} target="_blank" rel="noreferrer">{photo.author}</a> · <a className="underline" href={photo.licenceUrl}>{photo.licence}</a></p>
+      <div className="px-4 pb-4"><Button disabled={!ready} variant="secondary" aria-pressed={favourite} onClick={onFavourite}>{favourite ? "★ Saved lesson" : "☆ Favourite lesson"}</Button></div>
     </li>
   );
 }

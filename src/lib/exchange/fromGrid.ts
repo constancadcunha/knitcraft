@@ -30,11 +30,10 @@ import {
   NO_STITCH_ID,
   createChart,
   getSymbol,
-  plainSymbolId,
   validateChart,
 } from "@/lib/chart";
 import { generateId } from "@/lib/id";
-import { lookupStitch, normalizeToken } from "./vocabulary";
+import { lookupStitch } from "./vocabulary";
 
 export type GridMode = "symbols" | "colours";
 
@@ -220,15 +219,14 @@ export function chartFromGridText(
         continue;
       }
       if (BLANK_MARKS.has(mark)) {
-        row.push(
-          mode === "colours"
-            ? { colorIndex: 0 }
-            : { colorIndex: 0, symbolId: plainSymbolId(options.craft) },
-        );
+        // An absent symbolId IS the craft's plain stitch — see symbols.ts — so
+        // a blank cell needs no id and a stored chart stays small.
+        row.push({ colorIndex: 0 });
         continue;
       }
       if (mode === "colours") {
-        row.push({ colorIndex: colorIndexFor(mark), symbolId: plainSymbolId(options.craft) });
+        // Colourwork is plain fabric throughout; only the colour changes.
+        row.push({ colorIndex: colorIndexFor(mark) });
         continue;
       }
       const found = lookupStitch(mark, options.craft, "RS");

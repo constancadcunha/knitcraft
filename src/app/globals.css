@@ -537,3 +537,5 @@ img[data-pixel] {
   body::before { display: none; }
   .panel, .press { box-shadow: none; }
 }
+
+select.select-field { appearance: none; padding-right: 2.75rem; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%232b2b2b' stroke-width='2'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 1rem center; }

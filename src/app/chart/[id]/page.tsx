@@ -15,6 +15,8 @@ import {
   undo,
   undoLabel,
 } from "@/lib/project/progress";
+import ProjectComments from "@/components/ProjectComments";
+import { getSymbol, workedForm } from "@/lib/chart";
 import ChartView from "@/components/chart/ChartView";
 import RowCloseUp from "@/components/tracker/RowCloseUp";
 import InstructionBrowser from "@/components/tracker/InstructionBrowser";
@@ -171,6 +173,7 @@ export default function TrackerPage(props: { params: Promise<{ id: string }> }) 
 
       <div className="mt-7 grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_23rem]">
         <div className="space-y-5">
+          {yarnChart && <Panel title="Read this row — every step" accent="berry"><ol className="max-h-64 overflow-auto space-y-2">{geometry.rows[progress.cursor.rowIndex]?.stitches.map((st, i) => <li key={i} className={i < view.stitchesDone ? "line-through text-ink-faint" : "text-ink"}>{i + 1}. {(getSymbol(st.symbolId) ? workedForm(getSymbol(st.symbolId)!, view.side ?? "RS").instruction : undefined) ?? "Work stitch"} · colour {(st.colorIndex ?? 0) + 1}</li>)}</ol></Panel>}
           <NowPanel
             rowNumber={view.rowNumber}
             totalRows={view.totalRows}
@@ -244,10 +247,11 @@ export default function TrackerPage(props: { params: Promise<{ id: string }> }) 
               totalRows={view.totalRows}
             >
               {stitchChart ? (
-                <CrossStitchView chart={stitchChart} cellSize={zoom || 16} />
+                <CrossStitchView chart={stitchChart} cellSize={zoom || 16} completed={Object.fromEntries(geometry.rows.flatMap(r => r.stitches.slice(0, progress.rowStitches[r.rowIndex] ?? 0).map(st => [`${r.rowIndex},${st.anchorCol}`, true])))} />
               ) : yarnChart ? (
                 <ChartView
                   chart={yarnChart}
+                  completed={Object.fromEntries(geometry.rows.flatMap(r => r.stitches.slice(0, progress.rowStitches[r.rowIndex] ?? 0).map(st => [`${r.rowIndex},${st.anchorCol}`, true])))}
                   cellSize={zoom || 20}
                   activeRow={view.rowNumber}
                   onCellClick={(row) =>
@@ -288,6 +292,7 @@ export default function TrackerPage(props: { params: Promise<{ id: string }> }) 
             onUndo={() => apply((p) => undo(p))}
           />
 
+          <ProjectComments projectId={project.id} />
           <Panel
             title={book ? "The instructions" : "Rows"}
             accent="fern"

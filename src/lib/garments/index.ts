@@ -32,6 +32,7 @@ export type {
   WorkedAs,
 } from "./types";
 
+import { shapeChart } from "./chartShape";
 import { createContext } from "./context";
 import { panelsFor, type Panel } from "./panels";
 import { resolveGarmentKind } from "./catalog";
@@ -68,16 +69,16 @@ export function draftGarment(request: GarmentRequest): GarmentDraft {
     warnings: ctx.warnings,
     pieces: panels.map((panel) => ({
       panel,
-      chart: starterChartFor({
+      chart: shapeChart(starterChartFor({
         id: `${kind}-${panel.name.toLowerCase().replace(/\s+/g, "-")}`,
         name: panel.name,
         craft: ctx.craft,
         stitches: panel.stitches,
         rows: panel.rows,
         worked: panel.worked,
-        edgeRows: panel.edgeRows,
+        edgeRows: request.options?.ribbing === false ? 0 : panel.edgeRows,
         crochetStitch: ctx.crochetStitch,
-      }),
+      }), panel, kind, ctx),
     })),
   };
 }

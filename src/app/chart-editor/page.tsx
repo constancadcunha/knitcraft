@@ -17,7 +17,7 @@ import { Panel } from "@/components/ui/Panel";
 import { Heading, Notice, Tag } from "@/components/ui/Bits";
 import { cn } from "@/lib/cn";
 import {
-  GARMENT_TYPES,
+  garmentsForCraft,
   defaultSizeForGarment,
   sizesForGarment,
   toKnitCraft,
@@ -45,6 +45,9 @@ export default function ChartEditorPage() {
   const router = useRouter();
   const store = useStore();
 
+  const [palette, setPalette] = useState(PALETTE);
+  const [newColour, setNewColour] = useState("#c65d9b");
+  const [ribbing, setRibbing] = useState(true);
   const [craft, setCraft] = useState<YarnCraft>("knitting");
   const [garment, setGarment] = useState<GarmentType>("Sweater");
   const [size, setSize] = useState<GarmentSize>(() => defaultSizeForGarment("Sweater"));
@@ -60,8 +63,9 @@ export default function ChartEditorPage() {
         craft: toKnitCraft(craft),
         size,
         gauge: { stitchesPer10cm, rowsPer10cm },
+        options: { ribbing },
       }),
-    [garment, craft, size, stitchesPer10cm, rowsPer10cm]
+    [garment, craft, size, stitchesPer10cm, rowsPer10cm, ribbing]
   );
 
   // The editor opens on a short setup rather than the full control panel:
@@ -77,7 +81,7 @@ export default function ChartEditorPage() {
   const [zoom, setZoom] = useState(0);
 
   const piece = draft.pieces[Math.min(pieceIndex, draft.pieces.length - 1)];
-  const chart = piece ? (edits[piece.chart.id] ?? piece.chart) : null;
+  const chart = useMemo(() => piece ? { ...(edits[piece.chart.id] ?? piece.chart), colors: palette } : null, [piece, edits, palette]);
 
   const sizes = useMemo(() => sizesForGarment(garment), [garment]);
 
@@ -102,6 +106,7 @@ export default function ChartEditorPage() {
   }
 
   function save() {
+    if (!store.loaded) return;
     const project = createProject({
       name: name.trim() || `${garment} (${size})`,
       craftType: craft,
@@ -112,7 +117,7 @@ export default function ChartEditorPage() {
 
     const charts = draft.pieces.map((p, i) =>
       createSavedChart({
-        chart: edits[p.chart.id] ?? p.chart,
+        chart: { ...(edits[p.chart.id] ?? p.chart), colors: palette },
         name: p.panel.name,
         piece: p.panel.name,
         order: i,
@@ -157,10 +162,11 @@ export default function ChartEditorPage() {
             }}
           />
 
+          <label className="flex items-center gap-4 p-4 border-2 border-ink/20"><input type="checkbox" className="check" checked={ribbing} onChange={e => { setRibbing(e.target.checked); setEdits({}); }} />Include ribbing on garment hems and cuffs</label>
           <div>
             <span className="label mb-2 block text-ink-soft">What are you making?</span>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {GARMENT_TYPES.map((g) => {
+              {garmentsForCraft(craft).map(({ id: g }) => {
                 const active = garment === g;
                 return (
                   <button
@@ -278,7 +284,7 @@ export default function ChartEditorPage() {
                 <div>
                   <p className="label mb-2 text-ink-soft">Yarn colour</p>
                   <div className="flex flex-wrap gap-2.5" role="group" aria-label="Yarn colour">
-                    {PALETTE.map((hex, i) => (
+                    {palette.map((hex, i) => (
                       <button
                         key={hex}
                         type="button"
@@ -300,6 +306,7 @@ export default function ChartEditorPage() {
                       </button>
                     ))}
                   </div>
+                  <div className="mt-3 flex items-center gap-3"><input type="color" aria-label="New yarn colour" value={newColour} onChange={e => setNewColour(e.target.value)} /><Button size="sm" onClick={() => { const index = palette.indexOf(newColour); if (index < 0) setPalette([...palette, newColour]); setColorIndex(index < 0 ? palette.length : index); }}>Add colour</Button></div>
                   <p className="mt-2.5 text-tiny text-ink-faint">
                     Painting with {PALETTE_NAMES[colorIndex] ?? `colour ${colorIndex + 1}`}.
                   </p>
@@ -418,7 +425,7 @@ export default function ChartEditorPage() {
                   hint="Leave it blank and the garment and size are used."
                 />
               </div>
-              <Button size="lg" onClick={save} className="shrink-0">
+              <Button size="lg" disabled={!store.loaded} onClick={save} className="shrink-0">
                 Save to library
               </Button>
             </div>

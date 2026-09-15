@@ -54,19 +54,11 @@ export function chartCraftFor(craft: Craft): ChartCraft {
  * Clip a real count to an editable window, landing on a whole repeat where the
  * fabric has one so the panel tiles correctly.
  */
-function windowFor(actual: number, max: number, repeat = 1): number {
-  const safe = Math.max(1, Math.round(actual));
-  if (safe <= max) return safe;
-  const mult = Math.max(1, Math.round(repeat));
-  const windowed = Math.floor(max / mult) * mult;
-  return Math.max(mult, windowed);
-}
 
 export function starterChartFor(input: StarterChartInput): SymbolChart {
   const craft = chartCraftFor(input.craft);
-  const repeat = Math.max(1, Math.round(input.repeat ?? (input.craft === "knitting" ? 4 : 1)));
-  const width = windowFor(input.stitches, MAX_CHART_WIDTH, repeat);
-  const height = windowFor(input.rows, MAX_CHART_HEIGHT, 2);
+  const width = Math.max(1, Math.round(input.stitches));
+  const height = Math.max(1, Math.round(input.rows));
   const clipped = width < Math.round(input.stitches) || height < Math.round(input.rows);
 
   let chart = createChart({
@@ -84,7 +76,7 @@ export function starterChartFor(input: StarterChartInput): SymbolChart {
   // ribbing for crochet worked in dc/hdc, plain sc otherwise. Capped so a short
   // chart is not entirely edge.
   const edgeRows = Math.min(
-    Math.max(0, Math.round(input.edgeRows ?? Math.min(6, Math.floor(height / 4)))),
+    Math.max(0, Math.round(input.edgeRows ?? 0)),
     Math.max(0, height - 1),
   );
 
