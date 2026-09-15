@@ -1,344 +1,541 @@
 @import "tailwindcss";
 
+/* ============================================================================
+   STITCHCRAFT STUDIO — "Stitch & Pixel" design system
+   ----------------------------------------------------------------------------
+   ONE system. Every value below is a token; pages must never hard-code a hex.
+   The premise: a knitting chart IS pixel art. So the interface is built like a
+   sprite sheet — square corners, hard offset shadows, chunky ink outlines,
+   a chart grid for a background, and a palette that reads as printed comic
+   rather than neon arcade.
+
+   Rules for anyone editing pages:
+     - no `!important`
+     - no inline hex colours — use a token utility (bg-ink, text-berry, ...)
+     - no blur shadows — use shadow-pop / shadow-pop-lg / shadow-pop-sm
+     - no rounded corners — the radius scale is deliberately 0
+     - ALWAYS give text room. Every panel, card, cell, badge and list item
+       needs real internal padding; nothing should touch a border or an edge.
+       Panels default to p-4; tighten to p-3 only for genuinely dense UI.
+     - never combine `overflow-hidden` with `.panel` or `.lift` (see below)
+   ========================================================================== */
+
 @theme {
-  --color-background: #fdfbf7;
-  --color-foreground: #4a3f35;
-  --color-primary: #c89b7e;
-  --color-secondary-bg: #f5ede6;
-  --color-border: rgba(139, 121, 104, 0.2);
-  --color-muted: #8b7968;
-  --color-card: #ffffff;
+  /* --- surfaces -------------------------------------------------------- */
+  --color-paper: #f7efdd;        /* page — warm newsprint */
+  --color-panel: #fffdf6;        /* cards, raised surfaces */
+  --color-panel-sunk: #efe4cb;   /* wells, inputs, inactive tracks */
+  --color-ink: #1f1b2e;          /* all outlines + primary text */
+  --color-ink-soft: #5b5470;     /* secondary text */
+  --color-ink-faint: #8e87a3;    /* tertiary text, placeholders */
 
-  --color-cream: #fdfbf7;
-  --color-cream-mid: #f5ede6;
-  --color-cream-dark: #ecdccb;
-  --color-cream-border: #e8ddd0;
-  --color-espresso: #4a3f35;
-  --color-brown: #8b6f47;
-  --color-tan: #c89b7e;
-  --color-rose: #c89b7e;
-  --color-sage: #6a9470;
-  --color-mauve: #9e7a8a;
-  --color-slate: #6e88a8;
+  /* --- the eight-colour sprite palette --------------------------------- */
+  --color-berry: #e2483d;        /* primary action */
+  --color-berry-deep: #b8322a;   /* primary pressed */
+  --color-cobalt: #2f6fd0;       /* links, info, selection */
+  --color-cobalt-deep: #1f4e9c;
+  --color-fern: #3f9e56;         /* success, completed rows */
+  --color-fern-deep: #2c7a3e;
+  --color-gold: #f2b53c;         /* highlight, in-progress */
+  --color-gold-deep: #cf9219;
+  --color-grape: #7c53c3;        /* charts, secondary accent */
+  --color-grape-deep: #5c3a97;
+  --color-blush: #e46fa4;        /* crochet accent */
+  --color-teal: #2fa7a0;         /* knitting accent */
+  --color-rust: #c2591f;         /* warnings */
 
-  --font-display: var(--font-lora);
-  --font-body: var(--font-inter);
+  /* --- semantic aliases ------------------------------------------------- */
+  --color-background: var(--color-paper);
+  --color-foreground: var(--color-ink);
+  --color-primary: var(--color-berry);
+  --color-border: var(--color-ink);
+  --color-muted: var(--color-ink-soft);
+
+  /* --- typography ------------------------------------------------------- */
+  /* Press Start 2P: logo + hero only. Extremely wide — never for prose.
+     Silkscreen: UI chrome — buttons, nav, labels, table heads, badges.
+     Space Grotesk: everything a human actually reads. */
+  --font-display: var(--font-press-start), ui-monospace, monospace;
+  --font-ui: var(--font-silkscreen), ui-monospace, monospace;
+  --font-body: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-space-grotesk), ui-monospace, monospace;
+
+  /* --- square by decree ------------------------------------------------- */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+  --radius-4xl: 0px;
+
+  /* --- hard offset shadows, never blurred ------------------------------- */
+  --shadow-pop-sm: 2px 2px 0 var(--color-ink);
+  --shadow-pop: 4px 4px 0 var(--color-ink);
+  --shadow-pop-lg: 7px 7px 0 var(--color-ink);
+  --shadow-pop-xl: 10px 10px 0 var(--color-ink);
+  --shadow-inset-pop: inset 2px 2px 0 rgb(31 27 46 / 0.14);
+
+  /* --- coloured drop shadows for accent cards --------------------------- */
+  --shadow-pop-berry: 4px 4px 0 var(--color-berry-deep);
+  --shadow-pop-cobalt: 4px 4px 0 var(--color-cobalt-deep);
+  --shadow-pop-fern: 4px 4px 0 var(--color-fern-deep);
+  --shadow-pop-grape: 4px 4px 0 var(--color-grape-deep);
+
+  /* --- rhythm ----------------------------------------------------------- */
+  --spacing: 0.25rem;
+  /* Small UI text. Was 9px in a pixel font, which nobody could read; the
+     retro feel now comes from the uppercase and the tracking, not from
+     forcing a bitmap face down to a size it was never drawn for. */
+  --text-micro: 0.6875rem;      /* 11px */
+  --text-micro--line-height: 1.45;
+  --text-tiny: 0.6875rem;       /* 11px */
+  --text-tiny--line-height: 1.5;
+
+  /* --- motion ----------------------------------------------------------- */
+  --ease-snap: cubic-bezier(0.2, 0.9, 0.3, 1.3);
 }
 
-* {
+/* ============================================================================
+   BASE
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
   box-sizing: border-box;
   min-width: 0;
 }
 
 html {
   scroll-behavior: smooth;
-  overflow-x: hidden;
-  max-width: 100vw;
-  width: 100%;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  background-color: #fff4d6;
-  background-image:
-    radial-gradient(circle at 1px 1px, rgba(37, 26, 28, 0.16) 1px, transparent 0),
-    linear-gradient(135deg, rgba(242, 107, 94, 0.18), transparent 32%),
-    linear-gradient(315deg, rgba(44, 123, 229, 0.16), transparent 36%);
-  background-size: 14px 14px, 100% 100%, 100% 100%;
-  color: #251a1c;
-  font-family: var(--font-body), system-ui, sans-serif;
+  margin: 0;
+  min-height: 100dvh;
+  color: var(--color-ink);
+  background-color: var(--color-paper);
+  font-family: var(--font-body);
+  font-size: 0.9375rem;
+  line-height: 1.65;
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
-  max-width: 100vw;
-  width: 100%;
-  position: relative;
+  text-rendering: optimizeLegibility;
+
+  /* The page background is a knitting chart. 24px squares, barely there. */
+  background-image:
+    linear-gradient(to right, rgb(31 27 46 / 0.055) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(31 27 46 / 0.055) 1px, transparent 1px);
+  background-size: 24px 24px;
+  background-position: center top;
 }
 
-main {
-  min-width: 0;
-  max-width: 100vw;
-  overflow-x: hidden;
-  width: 100%;
+/* Every 6th line is darker — like the bold repeat lines on real chart paper. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgb(31 27 46 / 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(31 27 46 / 0.07) 1px, transparent 1px);
+  background-size: 144px 144px;
+  background-position: center top;
 }
 
-/* Prevent any direct child of main from ever exceeding viewport */
-main > * {
-  max-width: 100%;
-  min-width: 0;
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-body);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.25;
+  text-wrap: balance;
+  margin: 0;
 }
 
-body > * {
-  max-width: 100vw;
-}
+p { text-wrap: pretty; }
 
-img,
-svg {
-  max-width: 100%;
-}
-
-/* Canvas should never overflow its container horizontally */
-canvas {
+img, svg, video, canvas {
   max-width: 100%;
   display: block;
 }
 
-.overflow-auto,
-.overflow-x-auto {
-  max-width: 100%;
-}
-
-h1, h2, h3, h4, h5, h6 {
-  font-family: var(--font-display), "Georgia", serif;
-  color: #251a1c;
-  letter-spacing: 0;
+/* Pixel art and chart canvases must never be smoothed. */
+canvas,
+img[data-pixel] {
+  image-rendering: pixelated;
 }
 
 ::selection {
-  background: #ffd166;
-  color: #251a1c;
+  background: var(--color-gold);
+  color: var(--color-ink);
 }
 
-:root {
-  --kc-ink: #251a1c;
-  --kc-paper: #fff4d6;
-  --kc-panel: #fffaf0;
-  --kc-rose: #f26b5e;
-  --kc-blue: #2c7be5;
-  --kc-green: #4fae68;
-  --kc-gold: #ffd166;
-  --kc-shadow: 6px 6px 0 #251a1c;
-  --kc-shadow-sm: 4px 4px 0 #251a1c;
-  --font-playfair: var(--font-lora);
+/* One focus treatment everywhere — thick, square, unmistakable. */
+:focus-visible {
+  outline: 3px solid var(--color-cobalt);
+  outline-offset: 2px;
 }
 
-/* === CARDS === */
-.glass {
-  background: var(--kc-panel) !important;
-  border: 2px solid var(--kc-ink) !important;
-  border-radius: 8px !important;
-  box-shadow: var(--kc-shadow-sm);
+/* ============================================================================
+   COMPONENT PRIMITIVES
+   Utility classes for the handful of shapes used on every page.
+   ========================================================================== */
+
+/* --- panel: the universal card ----------------------------------------- */
+.panel {
+  background: var(--color-panel);
+  border: 3px solid var(--color-ink);
+  box-shadow: var(--shadow-pop);
 }
-.glass-warm {
-  background: #fff0bf !important;
-  border: 2px solid var(--kc-ink);
-  border-radius: 8px;
-  box-shadow: var(--kc-shadow-sm);
+.panel-sunk {
+  background: var(--color-panel-sunk);
+  border: 3px solid var(--color-ink);
+  box-shadow: var(--shadow-inset-pop);
+}
+.panel-flat {
+  background: var(--color-panel);
+  border: 3px solid var(--color-ink);
 }
 
-/* === GRADIENT BACKGROUND === */
-.page-bg {
-  background: transparent;
-  min-height: 100vh;
+/* --- lift: hover behaviour for interactive panels -----------------------
+   HAZARD: never put `overflow-hidden` on the same element as `.lift` or
+   `.panel`. The hover state translates the card -3px and casts a 7px offset
+   shadow, so clipping the box cuts the shadow and any artwork inside it — this
+   is exactly the "squares are half cut off when you hover" bug. If you need to
+   clip an image to the card, wrap the image in `.media` instead and leave the
+   lifting element unclipped. */
+.lift {
+  transition:
+    transform 0.14s var(--ease-snap),
+    box-shadow 0.14s var(--ease-snap);
+}
+.lift:hover {
+  transform: translate(-3px, -3px);
+  box-shadow: var(--shadow-pop-lg);
+}
+.lift:active {
+  transform: translate(1px, 1px);
+  box-shadow: var(--shadow-pop-sm);
 }
 
-/* Animated soft blobs behind hero */
-.blob-1 {
-  display: none;
+/* A sprite icon. The emitted SVG carries its own width/height, so without an
+   explicit box it renders at natural size and overruns whatever sits below it. */
+.sprite-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-.blob-2 {
-  display: none;
-}
-.blob-3 {
-  display: none;
-}
-
-@keyframes blob-drift {
-  0%   { transform: translate(0, 0) scale(1); }
-  33%  { transform: translate(30px, -20px) scale(1.05); }
-  66%  { transform: translate(-20px, 30px) scale(0.95); }
-  100% { transform: translate(15px, -10px) scale(1.02); }
+.sprite-icon > svg {
+  width: 100%;
+  height: 100%;
 }
 
-/* === CARD HOVER === */
-.card-lift {
-  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
-              box-shadow 0.25s ease;
+/* A tile holding an INLINE SVG diagram.
+   `object-fit` does nothing for inline SVG — it only applies to replaced
+   elements like <img>. An emitted diagram carries its own width/height
+   attributes, so without this it renders at natural size and spills over
+   whatever follows it. Constrain by max-* and let the aspect ratio hold. */
+.diagram-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
 }
-.card-lift:hover {
+.diagram-tile > svg {
+  /* The emitter always writes preserveAspectRatio="xMidYMid meet", so giving
+     the SVG an explicit box makes it scale down and centre inside the tile.
+     A percentage max-height does not reliably clamp an inline SVG that
+     carries its own width/height attributes. */
+  width: 100%;
+  height: 100%;
+}
+
+/* Clip photographic artwork HERE, never on the lifting card itself. */
+.media {
+  overflow: hidden;
+  position: relative;
+  background: var(--color-panel-sunk);
+}
+.media > img,
+.media > svg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* --- press: buttons ------------------------------------------------------ */
+.press {
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  border: 3px solid var(--color-ink);
+  box-shadow: var(--shadow-pop);
+  transition:
+    transform 0.1s var(--ease-snap),
+    box-shadow 0.1s var(--ease-snap),
+    background-color 0.1s linear;
+  cursor: pointer;
+  user-select: none;
+}
+.press:hover:not(:disabled) {
   transform: translate(-2px, -2px);
-  box-shadow: 8px 8px 0 var(--kc-ink);
+  box-shadow: var(--shadow-pop-lg);
+}
+.press:active:not(:disabled) {
+  transform: translate(4px, 4px);
+  box-shadow: none;
+}
+.press:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: var(--shadow-pop-sm);
 }
 
-/* === ICON GRADIENT CONTAINERS === */
-.icon-rose {
-  background: #f26b5e;
-}
-.icon-sage {
-  background: #4fae68;
-}
-.icon-slate {
-  background: #2c7be5;
-}
-.icon-tan {
-  background: #ffd166;
-}
-.icon-mauve {
-  background: #a45ee5;
-}
-
-.icon-rose,
-.icon-sage,
-.icon-slate,
-.icon-tan,
-.icon-mauve {
-  border: 2px solid var(--kc-ink);
-  box-shadow: var(--kc-shadow-sm);
-}
-
-nav,
-footer {
-  border-color: var(--kc-ink) !important;
-}
-
-nav {
-  border-bottom-width: 3px !important;
-  box-shadow: 0 4px 0 var(--kc-ink) !important;
-}
-
-main a,
-button {
-  border-radius: 8px !important;
-}
-
-button:not(:disabled),
-a[href] {
-  text-decoration-thickness: 2px;
-}
-
-input,
-textarea,
-select {
-  border: 2px solid var(--kc-ink) !important;
-  border-radius: 8px !important;
-  background: #fffaf0 !important;
-}
-
-.rounded-2xl,
-.rounded-3xl,
-.rounded-\[16px\],
-.rounded-xl {
-  border-radius: 8px !important;
-}
-
-.shadow-lg,
-.shadow-md,
-.shadow-xl,
-.shadow-sm {
-  box-shadow: var(--kc-shadow-sm) !important;
-}
-
-.bg-white,
-.bg-white\/60,
-.bg-white\/95 {
-  background-color: #fffaf0 !important;
-}
-
-/* === KNIT DIVIDER === */
-.knit-divider {
-  background-image: repeating-linear-gradient(
-    90deg,
-    transparent,
-    transparent 4px,
-    rgba(139, 99, 71, 0.1) 4px,
-    rgba(139, 99, 71, 0.1) 5px
+/* --- stepped "pixel" corners for hero elements -------------------------- */
+.pixel-corners {
+  clip-path: polygon(
+    0 6px, 3px 6px, 3px 3px, 6px 3px, 6px 0,
+    calc(100% - 6px) 0, calc(100% - 6px) 3px, calc(100% - 3px) 3px,
+    calc(100% - 3px) 6px, 100% 6px,
+    100% calc(100% - 6px), calc(100% - 3px) calc(100% - 6px),
+    calc(100% - 3px) calc(100% - 3px), calc(100% - 6px) calc(100% - 3px),
+    calc(100% - 6px) 100%,
+    6px 100%, 6px calc(100% - 3px), 3px calc(100% - 3px),
+    3px calc(100% - 6px), 0 calc(100% - 6px)
   );
-  height: 2px;
 }
 
-/* === LOADING DOTS === */
-@keyframes pulse-dot {
-  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
-  40% { opacity: 1; transform: scale(1); }
+/* --- dither: 2px checkerboard texture ----------------------------------- */
+.dither {
+  background-image:
+    repeating-conic-gradient(
+      var(--dither-color, rgb(31 27 46 / 0.18)) 0% 25%,
+      transparent 0% 50%
+    );
+  background-size: 4px 4px;
 }
-.loading-dot:nth-child(1) { animation: pulse-dot 1.4s ease-in-out infinite 0s; }
-.loading-dot:nth-child(2) { animation: pulse-dot 1.4s ease-in-out infinite 0.2s; }
-.loading-dot:nth-child(3) { animation: pulse-dot 1.4s ease-in-out infinite 0.4s; }
 
-/* === FADE IN === */
-@keyframes fade-up {
-  from { opacity: 0; transform: translateY(16px); }
+/* --- chart-grid: for chart/swatch surfaces ------------------------------ */
+.chart-grid {
+  background-image:
+    linear-gradient(to right, rgb(31 27 46 / 0.18) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(31 27 46 / 0.18) 1px, transparent 1px);
+  background-size: var(--chart-cell, 16px) var(--chart-cell, 16px);
+}
+
+/* --- label: Silkscreen micro-caps --------------------------------------- */
+/* Small caps used for labels, eyebrows and table heads.
+   Body face, not the pixel face: at this size a bitmap font is illegible,
+   and uppercase plus tracking carries the same character. */
+.label {
+  font-family: var(--font-body);
+  font-size: var(--text-micro);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  line-height: 1.45;
+}
+
+/* --- tag: small status pill (square, obviously) ------------------------- */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.3125rem 0.5625rem;
+  border: 2px solid var(--color-ink);
+  font-family: var(--font-body);
+  font-size: var(--text-micro);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  line-height: 1.45;
+}
+
+/* --- form controls ------------------------------------------------------ */
+.field {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.625rem 0.75rem;
+  background: var(--color-panel);
+  border: 3px solid var(--color-ink);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: 0.9375rem;
+  box-shadow: var(--shadow-inset-pop);
+}
+.field::placeholder { color: var(--color-ink-faint); }
+.field:focus {
+  outline: none;
+  border-color: var(--color-cobalt);
+  box-shadow: var(--shadow-pop-sm);
+}
+
+/* --- checkbox: chunky, stamped ------------------------------------------ */
+.check {
+  appearance: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
+  background: var(--color-panel);
+  border: 3px solid var(--color-ink);
+  cursor: pointer;
+  transition: background-color 0.1s linear;
+}
+.check:checked {
+  background-color: var(--color-fern);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'%3E%3Cpath fill='%23fffdf6' d='M1 3h1v1H1zM2 4h1v1H2zM3 5h1v1H3zM4 4h1v1H4zM5 3h1v1H5zM6 2h1v1H6z'/%3E%3C/svg%3E");
+  background-size: 100%;
+  background-repeat: no-repeat;
+}
+
+/* --- scrollbars ---------------------------------------------------------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-ink) var(--color-panel-sunk);
+}
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: var(--color-panel-sunk); }
+::-webkit-scrollbar-thumb {
+  background: var(--color-ink);
+  border: 3px solid var(--color-panel-sunk);
+}
+
+
+/* --- chart-board: the scroll box a chart SVG lives in --------------------
+   ChartView writes explicit `width`/`height` attributes on its <svg> AND
+   carries its own `max-w-full`. In a plain container that pair fights: the
+   width is clamped to the container while the intrinsic height attribute
+   stays at full size, so the SVG scales down inside a box that is still as
+   tall as the unscaled chart — a 60-row sweater back drew ~600px of blank
+   panel above and below itself. Undo the clamp here (a child selector
+   outranks the utility, and unlayered rules outrank Tailwind's layers) and
+   let the BOX scroll instead. A chart read at true cell size is the point;
+   scrolling to the part you are working is how chart paper works anyway. */
+.chart-board {
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--color-panel);
+  border: 3px solid var(--color-ink);
+  box-shadow: var(--shadow-inset-pop);
+  padding: 0.625rem;
+}
+.chart-board > svg {
+  max-width: none;
+  margin-inline: auto;
+}
+
+/* The other half of the pair: show the WHOLE piece, scaled to the column.
+   `height: auto` is what kills the empty band — the SVG then takes its height
+   from the viewBox ratio instead of from its own height attribute. */
+.chart-fit {
+  background: var(--color-panel);
+  border: 3px solid var(--color-ink);
+  box-shadow: var(--shadow-inset-pop);
+  padding: 0.625rem;
+}
+.chart-fit > svg {
+  width: 100%;
+  height: auto;
+}
+
+/* --- stat: a readout meant to be legible from across the room -----------
+   The tracker is looked at from wherever the knitting is — a metre away, on a
+   phone propped against a mug. These numbers are sized for that distance, not
+   for a desk. */
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 0.875rem;
+  border: 3px solid var(--color-ink);
+  background: var(--color-panel);
+}
+.stat-value {
+  font-family: var(--font-ui);
+  font-size: clamp(1.75rem, 8vw, 2.5rem);
+  line-height: 1;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- hit: the minimum comfortable target --------------------------------
+   44px, not the 24px WCAG floor: the person tapping is holding two needles
+   and a ball of yarn, and a mis-tap loses their place in the row. */
+.hit {
+  min-height: 2.75rem;
+}
+
+/* --- stripe: 45° ink hatching ------------------------------------------
+   Texture for surfaces that are deliberately empty — an unstarted meter, a
+   blank state, a finished-and-closed row. Reads as printed screentone. */
+.stripe {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--stripe-color, rgb(31 27 46 / 0.13)) 0 3px,
+    transparent 3px 8px
+  );
+}
+
+/* ============================================================================
+   MOTION
+   ========================================================================== */
+
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.fade-in   { animation: fade-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-.fade-in-1 { animation: fade-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) 0.1s forwards; opacity: 0; }
-.fade-in-2 { animation: fade-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) 0.2s forwards; opacity: 0; }
-.fade-in-3 { animation: fade-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) 0.3s forwards; opacity: 0; }
-.fade-in-4 { animation: fade-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) 0.4s forwards; opacity: 0; }
+.pop-in { animation: pop-in 0.28s var(--ease-snap) both; }
 
-/* === SCROLLBAR === */
-::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: #ecdccb; }
-::-webkit-scrollbar-thumb { background: #c4a07e; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #8b6347; }
-
-/* === CHECKBOX === */
-input[type="checkbox"].stitch-check {
-  appearance: none;
-  width: 18px;
-  height: 18px;
-  border: 1.5px solid #c4a07e;
-  border-radius: 4px;
-  background: white;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  flex-shrink: 0;
+@keyframes blink-caret {
+  0%, 49%  { opacity: 1; }
+  50%, 100% { opacity: 0; }
 }
-input[type="checkbox"].stitch-check:checked {
-  background: #6a9470;
-  border-color: #6a9470;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 10'%3E%3Cpath d='M1 5l3 4L11 1' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: 11px;
+.caret { animation: blink-caret 1s steps(1) infinite; }
+
+/* Stepped, 4-frame loader — reads as a sprite animation, not a spinner. */
+@keyframes sprite-step {
+  0%, 100% { transform: translateY(0); }
+  25%      { transform: translateY(-5px); }
+  50%      { transform: translateY(0); }
+  75%      { transform: translateY(5px); }
 }
+.sprite-dot { animation: sprite-step 0.8s steps(4, end) infinite; }
+.sprite-dot:nth-child(2) { animation-delay: 0.1s; }
+.sprite-dot:nth-child(3) { animation-delay: 0.2s; }
 
-/* === CANVAS === */
-canvas.grid-canvas { cursor: crosshair; }
-
-.comic-panel {
-  background: #fffaf0;
-  border: 3px solid var(--kc-ink);
-  border-radius: 8px;
-  box-shadow: var(--kc-shadow-sm);
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .lift:hover,
+  .press:hover:not(:disabled) { transform: none; }
 }
 
-.comic-panel h1,
-.comic-panel h2,
-.comic-panel h3 {
-  letter-spacing: 0;
-}
-
-.confetti-strip span {
-  position: absolute;
-  top: -24px;
-  width: 10px;
-  height: 18px;
-  border: 2px solid var(--kc-ink);
-  background: #ffd166;
-  animation: confetti-fall 1.3s ease-in infinite;
-}
-
-.confetti-strip span:nth-child(3n) {
-  background: #f26b5e;
-}
-
-.confetti-strip span:nth-child(3n + 1) {
-  background: #2c7be5;
-}
-
-@keyframes confetti-fall {
-  0% { transform: translateY(-12px) rotate(0deg); opacity: 0; }
-  15% { opacity: 1; }
-  100% { transform: translateY(360px) rotate(260deg); opacity: 0; }
-}
+/* ============================================================================
+   RESPONSIVE — shadows shrink on small screens so they don't eat the gutter
+   ========================================================================== */
 
 @media (max-width: 640px) {
-  .shadow-lg,
-  .shadow-md,
-  .shadow-xl,
-  .shadow-sm,
-  .glass,
-  .glass-warm,
-  .comic-panel {
-    box-shadow: 3px 3px 0 var(--kc-ink) !important;
-  }
+  .panel { box-shadow: var(--shadow-pop-sm); }
+  .press { box-shadow: var(--shadow-pop-sm); }
+  .lift:hover { box-shadow: var(--shadow-pop); }
 }
+
+@media print {
+  body { background: #fff; }
+  body::before { display: none; }
+  .panel, .press { box-shadow: none; }
+}
+
+select.select-field { appearance: none; padding-right: 2.75rem; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%232b2b2b' stroke-width='2'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 1rem center; }

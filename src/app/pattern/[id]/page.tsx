@@ -1,481 +1,312 @@
 "use client";
 
-import { use, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { use, useMemo, useState } from "react";
+import MaterialsChecklist from "@/components/MaterialsChecklist";
+import ProjectComments from "@/components/ProjectComments";
 import Link from "next/link";
 import { useStore } from "@/lib/store";
-import type { Pattern, Abbreviation } from "@/types";
-import { getQuickReference } from "@/lib/projectGuides";
+import { Button, ButtonLink } from "@/components/ui/Button";
+import { EmptyState, Heading, Loading, SectionHeading, Tag } from "@/components/ui/Bits";
+import { Panel } from "@/components/ui/Panel";
+import InstructionBrowser from "@/components/tracker/InstructionBrowser";
+import { rowsFromWrittenInstructions } from "@/components/tracker/instructionSections";
+import { CRAFT_LABELS, type ChartProgress, type PatternSection, type Project } from "@/types";
+import { cn } from "@/lib/cn";
 
 export default function PatternPage(props: { params: Promise<{ id: string }> }) {
   const { id } = use(props.params);
-  const { getPattern, toggleRowCompleted, deletePattern } = useStore();
-  const router = useRouter();
-  const pattern = getPattern(id);
+  const store = useStore();
+  const project = store.getProject(id);
 
-  if (!pattern) {
+  if (!store.loaded) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 text-center px-4">
-        <div className="w-14 h-14 rounded-xl border-2 border-[#3d2b1f] bg-[#f0e8da] shadow-[5px_5px_0_#3d2b1f]" />
-        <h2
-          className="text-2xl font-bold text-[#3d2b1f]"
-          style={{ fontFamily: "var(--font-playfair), serif" }}
-        >
-          Pattern not found
-        </h2>
-        <p className="text-[#8b6f47]">This pattern may have been deleted or doesn&apos;t exist.</p>
-        <Link
-          href="/saved"
-          className="mt-2 px-5 py-2.5 bg-[#8b6f47] text-white rounded-[10px] font-medium text-sm hover:bg-[#6b5344] transition-colors"
-        >
-          View My Library
-        </Link>
+      <div className="mx-auto max-w-4xl px-4 py-12 sm:px-6">
+        <Loading>Opening the pattern</Loading>
+      </div>
+    );
+  }
+
+  if (!project) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
+        <EmptyState
+          title="Project not found"
+          description="It may have been deleted, or saved in a different browser."
+          action={<ButtonLink href="/saved">Back to library</ButtonLink>}
+        />
       </div>
     );
   }
 
   return (
-    <PatternView
-      pattern={pattern}
-      onToggleRow={toggleRowCompleted}
-      onDelete={() => {
-        deletePattern(id);
-        router.push("/saved");
-      }}
-    />
+    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 sm:py-12">
+      <Heading
+        eyebrow={`${CRAFT_LABELS[project.craftType]} pattern`}
+        title={project.name}
+        description={`${project.garmentType} · size ${project.size} · ${project.difficulty}`}
+        action={
+          project.charts[0] ? (
+            <ButtonLink href={`/chart/${project.id}?chart=${project.charts[0].id}`} size="lg">
+              Open tracker
+            </ButtonLink>
+          ) : undefined
+        }
+      />
+
+      {project.pattern && <div className="panel mt-6 p-5"><h2 className="label mb-4">What you’ll need</h2><MaterialsChecklist scope={project.id} items={[
+        ...project.pattern.materials.yarns.map((y, i) => ({ id: i === 0 ? "yarn" : `yarn-${i}`, label: y.yarn.name ?? "Yarn", detail: `${y.metres} m · ${y.balls} balls` })),
+        { id: "tool", label: project.craftType === "cross-stitch" ? "Embroidery needle" : project.craftType === "knitting" ? "Knitting needles" : "Crochet hook" },
+        { id: "notion-0", label: "Tapestry needle" }, { id: "notion-1", label: "Scissors" },
+      ]} /></div>}
+      <div className="mt-6"><ProjectComments projectId={project.id} /></div>
+      {project.pattern ? (
+        <PatternBody project={project} />
+      ) : (
+        <div className="mt-9">
+          <EmptyState
+            title="No written pattern yet"
+            description="This project has charts but no written instructions. Charts always carry their own row-by-row instructions — open the tracker to read them."
+            action={
+              project.charts[0] ? (
+                <ButtonLink
+                  href={`/chart/${project.id}?chart=${project.charts[0].id}`}
+                  variant="secondary"
+                >
+                  Read from the chart
+                </ButtonLink>
+              ) : undefined
+            }
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
-function PatternView({
-  pattern,
-  onToggleRow,
-  onDelete,
-}: {
-  pattern: Pattern;
-  onToggleRow: (pid: string, section: string, row: number) => void;
-  onDelete: () => void;
-}) {
-  const [currentSection, setCurrentSection] = useState(pattern.currentSection ?? 0);
-  const [activeAbbr, setActiveAbbr] = useState<Abbreviation | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const { updatePattern, charts } = useStore();
-
-  const section = pattern.sections[currentSection];
-
-  const totalRows = section?.instructions.length ?? 0;
-  const completedRows = Object.values(
-    pattern.completedRows[section?.name ?? ""] ?? {}
-  ).filter(Boolean).length;
-  const progress = totalRows > 0 ? Math.round((completedRows / totalRows) * 100) : 0;
-
-  const handleToggle = useCallback(
-    (rowNum: number) => {
-      onToggleRow(pattern.id, section.name, rowNum);
-    },
-    [pattern.id, section, onToggleRow]
+function PatternBody({ project }: { project: Project }) {
+  const pattern = project.pattern;
+  const measurements = useMemo(
+    () => Object.entries(pattern?.measurements ?? {}),
+    [pattern]
   );
-
-  const goToSection = (idx: number) => {
-    setCurrentSection(idx);
-    updatePattern(pattern.id, { currentSection: idx });
-  };
-
-  const allSectionDone =
-    totalRows > 0 &&
-    section.instructions.every(
-      (ins) => pattern.completedRows[section.name]?.[ins.rowNumber]
-    );
-  const quickReference = getQuickReference(pattern.craftType, pattern.garmentType);
-  const trackerChartId =
-    pattern.firstChartId ??
-    charts.find((chart) => chart.projectId === pattern.projectId)?.id;
+  if (!pattern) return null;
 
   return (
-    <div className="min-h-screen">
-      {/* Pattern header */}
-      <div className="bg-white border-b border-[#e8ddd0] px-4 py-6">
-        <div className="max-w-4xl mx-auto">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <div className="flex items-center gap-2 mb-2 flex-wrap">
-                <span className="text-xs font-semibold uppercase tracking-wide bg-[#f0e8da] text-[#8b6f47] px-2.5 py-1 rounded-full border border-[#e8ddd0]">
-                  {pattern.craftType}
-                </span>
-                <span className="text-xs font-semibold uppercase tracking-wide bg-[#f0e8da] text-[#8b6f47] px-2.5 py-1 rounded-full border border-[#e8ddd0]">
-                  {pattern.difficulty}
-                </span>
-                <span className="text-xs text-[#c4a882]">{pattern.estimatedTime}</span>
-              </div>
-              <h1
-                className="text-3xl sm:text-4xl font-bold text-[#3d2b1f]"
-                style={{ fontFamily: "var(--font-playfair), serif" }}
-              >
-                {pattern.name}
-              </h1>
-              <p className="text-[#8b6f47] text-sm mt-1">
-                {pattern.garmentType} / Sizes: {pattern.sizes.join(", ")}
-              </p>
-            </div>
-            <div className="flex gap-2">
-              {trackerChartId && (
-                <Link
-                  href={`/chart/${trackerChartId}`}
-                  className="px-4 py-2 rounded-[10px] border border-[#251a1c] bg-[#ffd166] text-sm text-[#251a1c] hover:bg-[#ffe08a] transition-colors font-black"
-                >
-                  Open tracker
-                </Link>
-              )}
-              <Link
-                href="/saved"
-                className="px-4 py-2 rounded-[10px] border border-[#e8ddd0] text-sm text-[#8b6f47] hover:bg-[#f0e8da] transition-colors font-medium"
-              >
-                Library
-              </Link>
-              {!confirmDelete ? (
-                <button
-                  onClick={() => setConfirmDelete(true)}
-                  className="px-4 py-2 rounded-[10px] border border-red-200 text-sm text-red-400 hover:bg-red-50 transition-colors font-medium"
-                >
-                  Delete
-                </button>
-              ) : (
-                <div className="flex gap-1.5 items-center">
-                  <span className="text-xs text-red-500">Sure?</span>
-                  <button
-                    onClick={onDelete}
-                    className="px-3 py-1.5 rounded-lg bg-red-500 text-white text-xs font-semibold hover:bg-red-600 transition-colors"
-                  >
-                    Yes, delete
-                  </button>
-                  <button
-                    onClick={() => setConfirmDelete(false)}
-                    className="px-3 py-1.5 rounded-lg border border-[#e8ddd0] text-xs text-[#8b6f47] hover:bg-[#f0e8da] transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
+    <div className="mt-9">
+      <SectionHeading>Before you cast on</SectionHeading>
+      <div className="space-y-5">
+        <Panel title="Gauge" accent="cobalt" headingAs="h3">
+          <p className="text-base text-ink">
+            <strong>{pattern.gauge.stitchesPer10cm} stitches</strong> and{" "}
+            <strong>{pattern.gauge.rowsPer10cm} rows</strong> to 10&nbsp;cm
+            {pattern.gauge.measuredOver ? ` over ${pattern.gauge.measuredOver}` : ""}.
+          </p>
+          <p className="mt-3 text-sm text-ink-soft">
+            Work a swatch and block it before you start. Gauge measured unblocked
+            is a guess, and every number below is derived from this one.
+          </p>
+        </Panel>
 
-      <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
-        {(pattern.previewImage || pattern.sourceImagePreview) && (
-          <div className="comic-panel overflow-hidden">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={pattern.previewImage || pattern.sourceImagePreview}
-              alt="Generated pattern preview"
-              className="h-64 w-full object-cover"
-            />
-          </div>
+        {measurements.length > 0 && (
+          <Panel title="Finished measurements" accent="grape" headingAs="h3">
+            <dl className="grid gap-x-8 sm:grid-cols-2">
+              {measurements.map(([name, cm]) => (
+                <div
+                  key={name}
+                  className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b-[3px] border-ink/10 py-2.5"
+                >
+                  <dt className="text-sm capitalize text-ink-soft">{name}</dt>
+                  <dd className="label text-ink">
+                    {cm} cm{" "}
+                    <span className="text-ink-faint">({(cm / 2.54).toFixed(1)} in)</span>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </Panel>
         )}
 
-        {/* Two-column layout on wider screens */}
-        <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
-          {/* Left sidebar */}
-          <div className="space-y-4">
-            {/* Materials */}
-            <CollapsibleCard title="Materials" defaultOpen>
-              <div className="space-y-3">
-                {pattern.materials.yarn.map((y, i) => (
-                  <div key={i} className="text-sm">
-                    <div className="font-semibold text-[#3d2b1f]">{y.name}</div>
-                    <div className="text-[#8b6f47]">
-                      {y.color} / {y.weight} / {y.meterage}m per skein
-                    </div>
-                    <div className="text-xs text-[#c4a882] mt-0.5">
-                      {pattern.sizes.map((sz) => `${sz}: ${y.skeins?.[sz] ?? "?"} skein${(y.skeins?.[sz] ?? 1) !== 1 ? "s" : ""}`).join(" / ")}
-                    </div>
-                  </div>
-                ))}
-                {pattern.materials.needles?.length > 0 && (
-                  <div className="text-sm pt-1 border-t border-[#e8ddd0]">
-                    <div className="font-semibold text-[#3d2b1f] mb-1">Needles</div>
-                    {pattern.materials.needles.map((n, i) => (
-                      <div key={i} className="text-[#8b6f47]">{n}</div>
-                    ))}
-                  </div>
-                )}
-                {pattern.materials.notions?.length > 0 && (
-                  <div className="text-sm pt-1 border-t border-[#e8ddd0]">
-                    <div className="font-semibold text-[#3d2b1f] mb-1">Notions</div>
-                    {pattern.materials.notions.map((n, i) => (
-                      <div key={i} className="text-[#8b6f47]">{n}</div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </CollapsibleCard>
+        {pattern.materials.yarns.length > 0 && (
+          <Panel title="Yarn" accent="berry" headingAs="h3">
+            <ul className="space-y-3">
+              {pattern.materials.yarns.map((requirement, i) => (
+                <li
+                  key={i}
+                  className="flex flex-wrap items-center gap-x-3 gap-y-2 border-[3px] border-ink bg-panel p-3"
+                >
+                  <Tag tone="gold">{requirement.role}</Tag>
+                  <span className="text-sm text-ink">
+                    {requirement.yarn.name ?? "Any yarn"}
+                    {requirement.yarn.brand ? ` (${requirement.yarn.brand})` : ""}
+                  </span>
+                  <span className="label ml-auto text-ink-soft">
+                    {Math.round(requirement.metres)} m · {requirement.balls} ball
+                    {requirement.balls === 1 ? "" : "s"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        )}
 
-            {/* Gauge */}
-            <CollapsibleCard title="Gauge">
-              <div className="text-sm space-y-1">
-                <div className="text-[#3d2b1f]">
-                  <span className="font-semibold">{pattern.gauge.stitches}</span> sts x{" "}
-                  <span className="font-semibold">{pattern.gauge.rows}</span> rows
+        {pattern.materials.needles.length > 0 && (
+          <Panel title="Needles & hooks" accent="teal" headingAs="h3">
+            <ul className="space-y-2.5">
+              {pattern.materials.needles.map((needle, i) => (
+                <li key={i} className="text-sm text-ink">
+                  <strong>{needle.mm} mm</strong> {needle.kind}
+                  {needle.use ? ` — ${needle.use}` : ""}
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        )}
+
+        {pattern.abbreviations.length > 0 && (
+          <Panel title="Abbreviations" accent="fern" headingAs="h3">
+            <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-2">
+              {pattern.abbreviations.map((abbreviation) => (
+                <div key={abbreviation.abbr} className="flex gap-3">
+                  <dt className="label shrink-0 pt-0.5 text-ink">{abbreviation.abbr}</dt>
+                  <dd className="text-sm text-ink-soft">{abbreviation.meaning}</dd>
                 </div>
-                <div className="text-[#8b6f47]">over {pattern.gauge.swatchSize}</div>
-                <div className="text-[#8b6f47]">Needle: {pattern.gauge.needleSize}</div>
-                <div className="text-[#8b6f47]">Yarn weight: {pattern.gauge.yarnWeight}</div>
-              </div>
-            </CollapsibleCard>
-
-            {/* Measurements */}
-            {pattern.measurements && Object.keys(pattern.measurements).length > 0 && (
-              <CollapsibleCard title="Sizing Chart">
-                <div className="overflow-x-auto -mx-1">
-                  <table className="text-xs w-full">
-                    <thead>
-                      <tr>
-                        <th className="text-left text-[#c4a882] pb-1.5 pr-2">Size</th>
-                        {Object.keys(
-                          Object.values(pattern.measurements)[0] ?? {}
-                        ).map((k) => (
-                          <th key={k} className="text-left text-[#c4a882] pb-1.5 pr-2 capitalize">
-                            {k}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {Object.entries(pattern.measurements).map(([sz, m]) => (
-                        <tr key={sz} className="border-t border-[#e8ddd0]">
-                          <td className="py-1 pr-2 font-semibold text-[#3d2b1f]">{sz}</td>
-                          {Object.values(m).map((v, i) => (
-                            <td key={i} className="py-1 pr-2 text-[#8b6f47]">{v}</td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </CollapsibleCard>
-            )}
-
-            {/* Abbreviations */}
-            <CollapsibleCard title="Abbreviations">
-              <div className="space-y-1.5">
-                {pattern.abbreviations.map((a) => (
-                  <button
-                    key={a.abbr}
-                    onClick={() => setActiveAbbr(activeAbbr?.abbr === a.abbr ? null : a)}
-                    className="w-full text-left group"
-                  >
-                    <div className="flex items-start gap-2">
-                      <span className="font-mono text-xs font-bold text-[#8b6f47] bg-[#f0e8da] px-1.5 py-0.5 rounded shrink-0">
-                        {a.abbr}
-                      </span>
-                      <span className="text-xs text-[#3d2b1f]">{a.meaning}</span>
-                    </div>
-                    {activeAbbr?.abbr === a.abbr && (
-                      <div className="mt-1.5 ml-1 p-2 bg-[#f0e8da] rounded-lg text-xs text-[#8b6f47]">
-                        <p className="mb-1.5">{a.meaning}</p>
-                        <a
-                          href={`https://www.youtube.com/results?search_query=${encodeURIComponent(a.videoKeywords)}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-[#d4907a] hover:underline font-medium"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          Watch tutorial on YouTube
-                        </a>
-                      </div>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </CollapsibleCard>
-
-            <CollapsibleCard title="Quick Reference">
-              <div className="space-y-3">
-                {quickReference.map((group) => (
-                  <div key={group.title}>
-                    <h4 className="text-xs font-bold text-[#3d2b1f] mb-1">{group.title}</h4>
-                    <div className="space-y-1.5">
-                      {group.items.map((item) => (
-                        <div key={item.title} className="text-xs">
-                          <span className="font-bold text-[#8b6f47]">{item.title}: </span>
-                          <span className="text-[#6b5d52]">{item.detail}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CollapsibleCard>
-
-            {pattern.notes && (
-              <CollapsibleCard title="Pattern Notes">
-                <p className="text-sm text-[#8b6f47] leading-relaxed">{pattern.notes}</p>
-              </CollapsibleCard>
-            )}
-          </div>
-
-          {/* Right: Section navigator + instructions */}
-          <div className="space-y-4">
-            {/* Section tabs */}
-            <div>
-              <p className="text-xs text-[#c4a882] uppercase tracking-wide font-semibold mb-2">
-                Sections
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {pattern.sections.map((sec, idx) => {
-                  const secRows = sec.instructions.length;
-                  const secDone = sec.instructions.filter(
-                    (ins) => pattern.completedRows[sec.name]?.[ins.rowNumber]
-                  ).length;
-                  const isDone = secRows > 0 && secDone === secRows;
-                  return (
-                    <button
-                      key={idx}
-                      onClick={() => goToSection(idx)}
-                      className={`px-3.5 py-2 rounded-[10px] text-sm font-medium border transition-colors ${
-                        currentSection === idx
-                          ? "bg-[#8b6f47] border-[#8b6f47] text-white"
-                          : isDone
-                          ? "bg-[#7a9e7e]/10 border-[#7a9e7e] text-[#7a9e7e]"
-                          : "border-[#e8ddd0] text-[#8b6f47] hover:bg-[#f0e8da]"
-                      }`}
-                    >
-                      {sec.name}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Current section */}
-            {section && (
-              <div className="bg-white rounded-[16px] border border-[#e8ddd0] overflow-hidden">
-                {/* Section header */}
-                <div className="px-5 py-4 border-b border-[#e8ddd0] flex items-center justify-between gap-3">
-                  <div>
-                    <h2
-                      className="text-xl font-bold text-[#3d2b1f]"
-                      style={{ fontFamily: "var(--font-playfair), serif" }}
-                    >
-                      {section.name}
-                    </h2>
-                    {section.description && (
-                      <p className="text-xs text-[#8b6f47] mt-0.5">{section.description}</p>
-                    )}
-                  </div>
-                  <div className="text-right shrink-0">
-                    <div className="text-sm font-bold text-[#3d2b1f]">{progress}%</div>
-                    <div className="text-xs text-[#c4a882]">{completedRows}/{totalRows} rows</div>
-                  </div>
-                </div>
-
-                {/* Progress bar */}
-                <div className="h-1.5 bg-[#e8ddd0]">
-                  <div
-                    className="h-full bg-[#7a9e7e] transition-all duration-300"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
-
-                {allSectionDone && (
-                  <div className="bg-[#7a9e7e]/10 border-b border-[#7a9e7e]/20 px-5 py-3 text-sm text-[#7a9e7e] font-medium text-center">
-                    Section complete.{" "}
-                    {currentSection < pattern.sections.length - 1 && (
-                      <button
-                        onClick={() => goToSection(currentSection + 1)}
-                        className="underline font-semibold"
-                      >
-                        Continue to {pattern.sections[currentSection + 1].name}
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {/* Instructions */}
-                <div className="divide-y divide-[#e8ddd0]">
-                  {section.instructions.map((ins) => {
-                    const done = !!pattern.completedRows[section.name]?.[ins.rowNumber];
-                    return (
-                      <label
-                        key={ins.rowNumber}
-                        className={`flex items-start gap-3.5 px-5 py-3.5 cursor-pointer transition-colors group ${
-                          done ? "bg-[#f0e8da]/50" : "hover:bg-[#faf7f2]"
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          className="stitch-check mt-0.5"
-                          checked={done}
-                          onChange={() => handleToggle(ins.rowNumber)}
-                        />
-                        <div className="flex-1 min-w-0">
-                          <span className="text-xs font-bold text-[#c4a882] mr-2 shrink-0">
-                            Row {ins.rowNumber}
-                          </span>
-                          <span
-                            className={`text-sm leading-relaxed ${
-                              done ? "line-through text-[#c4a882]" : "text-[#3d2b1f]"
-                            }`}
-                          >
-                            {ins.text}
-                          </span>
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-
-                {/* Section nav footer */}
-                <div className="px-5 py-3 border-t border-[#e8ddd0] flex justify-between">
-                  <button
-                    onClick={() => goToSection(currentSection - 1)}
-                    disabled={currentSection === 0}
-                    className="text-sm text-[#8b6f47] hover:text-[#3d2b1f] disabled:opacity-30 disabled:cursor-not-allowed font-medium transition-colors"
-                  >
-                    {currentSection > 0 ? pattern.sections[currentSection - 1].name : ""}
-                  </button>
-                  <button
-                    onClick={() => goToSection(currentSection + 1)}
-                    disabled={currentSection >= pattern.sections.length - 1}
-                    className="text-sm text-[#8b6f47] hover:text-[#3d2b1f] disabled:opacity-30 disabled:cursor-not-allowed font-medium transition-colors"
-                  >
-                    {currentSection < pattern.sections.length - 1
-                      ? pattern.sections[currentSection + 1].name
-                      : ""}{" "}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+              ))}
+            </dl>
+          </Panel>
+        )}
       </div>
+
+      {pattern.sections.length > 0 && (
+        <>
+          <SectionHeading
+            className="mt-12"
+            count={`${pattern.sections.length} piece${pattern.sections.length === 1 ? "" : "s"}`}
+          >
+            Making it
+          </SectionHeading>
+          <PieceReader project={project} sections={pattern.sections} />
+        </>
+      )}
+
+      {pattern.notes && (
+        <>
+          <SectionHeading className="mt-12">Notes</SectionHeading>
+          <Panel title="From the designer" accent="blush" headingAs="h3">
+            <p className="text-sm leading-relaxed text-ink">{pattern.notes}</p>
+          </Panel>
+        </>
+      )}
+
+      <p className="mt-10 text-sm text-ink-soft">
+        <Link
+          href="/saved"
+          className="inline-flex min-h-11 items-center underline underline-offset-4 hover:text-berry"
+        >
+          ← Back to library
+        </Link>
+      </p>
     </div>
   );
 }
 
-function CollapsibleCard({
-  title,
-  children,
-  defaultOpen = false,
+/* -------------------------------------------------------------------------- */
+/* Making it — one piece at a time                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The instructions, navigable at two levels.
+ *
+ * A garment is pieces and a piece is phases, and a reader needs to move between
+ * both. Printing every row of every piece in one column — which is what this
+ * page used to do — is 700 lines of prose with no way back to your place. So:
+ * pick the piece here, and the browser inside breaks that piece into hem, body,
+ * shaping and edging with its own previous/next and jump-to-row.
+ */
+function PieceReader({
+  project,
+  sections,
 }: {
-  title: string;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
+  project: Project;
+  sections: PatternSection[];
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [openIndex, setOpenIndex] = useState(0);
+  const index = Math.min(openIndex, sections.length - 1);
+  const section = sections[index];
+
+  const book = useMemo(
+    () => rowsFromWrittenInstructions(section.instructions),
+    [section]
+  );
+
+  // Where the maker actually is in this piece, if they have started it. The
+  // written pattern and the tracker are the same rows, so the page can say
+  // "you are here" without the reader having to hold it in their head. Stored
+  // row indices are 0-based; printed row numbers are not.
+  const tracked = section.chartId ? project.progress.charts[section.chartId] : undefined;
+  const activeRow = tracked && hasStarted(tracked) ? tracked.cursor.rowIndex + 1 : null;
+
   return (
-    <div className="bg-white rounded-[16px] border border-[#e8ddd0] overflow-hidden">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-[#faf7f2] transition-colors"
+    <div className="space-y-5">
+      <nav aria-label="Pieces">
+        <ul className="flex flex-wrap gap-2">
+          {sections.map((piece, i) => {
+            const current = i === index;
+            const started = hasStarted(
+              piece.chartId ? project.progress.charts[piece.chartId] : undefined
+            );
+            return (
+              <li key={piece.name}>
+                <Button
+                  size="sm"
+                  variant={current ? "primary" : "secondary"}
+                  aria-current={current ? "true" : undefined}
+                  onClick={() => setOpenIndex(i)}
+                >
+                  {started && (
+                    <span
+                      className={cn("h-2 w-2", current ? "bg-panel" : "bg-fern")}
+                      aria-hidden
+                    />
+                  )}
+                  {piece.name}
+                  <span className="opacity-70">
+                    {Math.max(0, piece.instructions.length - 1)} rows
+                  </span>
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
+
+      <Panel
+        title={section.name}
+        accent="gold"
+        headingAs="h3"
+        bodyClassName="p-4 sm:p-5"
+        action={
+          section.chartId ? (
+            <ButtonLink
+              href={`/chart/${project.id}?chart=${section.chartId}`}
+              size="sm"
+              variant="secondary"
+            >
+              Track this piece
+            </ButtonLink>
+          ) : undefined
+        }
       >
-        <span className="flex items-center gap-2 font-semibold text-sm text-[#3d2b1f]">
-          {title}
-        </span>
-        <span className={`text-[#c4a882] text-xs transition-transform ${open ? "rotate-180" : ""}`}>
-          v
-        </span>
-      </button>
-      {open && <div className="px-4 pb-4">{children}</div>}
+        {section.description && (
+          <p className="mb-4 text-sm text-ink-soft">{section.description}</p>
+        )}
+        <InstructionBrowser book={book} activeRow={activeRow} />
+      </Panel>
     </div>
   );
+}
+
+/** Has any work been done on this piece? A fresh tracker sits on row 1 untouched. */
+function hasStarted(progress: ChartProgress | undefined): boolean {
+  if (!progress) return false;
+  return progress.cursor.rowIndex > 0 || Object.keys(progress.rowStitches).length > 0;
 }

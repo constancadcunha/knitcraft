@@ -1,1125 +1,598 @@
 "use client";
 
-import { use, useRef, useEffect, useCallback, useState } from "react";
-import Link from "next/link";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useStore } from "@/lib/store";
-import { isActiveChartCell } from "@/lib/shapes";
-import type { QuickReferenceItem, SavedChart } from "@/types";
-import { ArrowLeft, PenLine, RotateCcw, CheckCheck, ChevronDown, ChevronRight, Check, BookOpen, X, ExternalLink } from "lucide-react";
+import { chartGeometry, rowIndexForNumber } from "@/lib/project/geometry";
+import {
+  decrement,
+  gotoRow,
+  increment,
+  setCount,
+  stitchesDoneInRow,
+  toggleRow,
+  trackerView,
+  undo,
+  undoLabel,
+} from "@/lib/project/progress";
+import ProjectComments from "@/components/ProjectComments";
+import { getSymbol, workedForm } from "@/lib/chart";
+import ChartView from "@/components/chart/ChartView";
+import RowCloseUp from "@/components/tracker/RowCloseUp";
+import InstructionBrowser from "@/components/tracker/InstructionBrowser";
+import {
+  panelStitchesFromChart,
+  rowsFromChart,
+  rowsFromWrittenInstructions,
+} from "@/components/tracker/instructionSections";
+import CrossStitchView from "@/components/chart/CrossStitchView";
+import ChartLegend from "@/components/chart/ChartLegend";
+import VoiceCounter from "@/components/VoiceCounter";
+import { Button, ButtonLink } from "@/components/ui/Button";
+import { Panel } from "@/components/ui/Panel";
+import { EmptyState, Heading, Loading, Meter, Stat, Tag } from "@/components/ui/Bits";
+import { isCrossStitchChart, type SavedChart } from "@/types";
+import { cn } from "@/lib/cn";
 
-const CELL_SIZE = 22;
-const ROW_CELL_SIZE = 28;
+/** Cell sizes the zoom control steps through, in px. */
+const ZOOMS = [
+  { value: 0, label: "Fit" },
+  { value: 16, label: "S" },
+  { value: 24, label: "M" },
+  { value: 36, label: "L" },
+] as const;
 
-type CompletionModalState = {
-  type: "step" | "project";
-  title: string;
-  message: string;
-  nextChartId?: string;
-};
-
-export default function ChartTrackerPage(props: { params: Promise<{ id: string }> }) {
+export default function TrackerPage(props: { params: Promise<{ id: string }> }) {
   const { id } = use(props.params);
-  const { charts, getChart, updateChart } = useStore();
-  const chart = getChart(id);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const canvasContainerRef = useRef<HTMLDivElement>(null);
-  const rowCanvasRef = useRef<HTMLCanvasElement>(null);
-  const rowPanelRef = useRef<HTMLDivElement>(null);
-  const rowScrollerRef = useRef<HTMLDivElement>(null);
-  const sidebarRef = useRef<HTMLDivElement>(null);
-  const rowRefs = useRef<Record<number, HTMLDivElement | null>>({});
-  const [isPainting, setIsPainting] = useState(false);
-  const [isRowPainting, setIsRowPainting] = useState(false);
-  const [selectedCell, setSelectedCell] = useState<{ row: number; col: number } | null>(null);
-  const paintModeRef = useRef<boolean>(true);
-  const rowPaintModeRef = useRef<boolean>(true);
-  const completedRef = useRef<Record<string, boolean>>({});
-  const visitedCellsRef = useRef<Set<string>>(new Set());
-  const visitedRowCellsRef = useRef<Set<string>>(new Set());
-  const [completionVersion, setCompletionVersion] = useState(0);
-  const [expandedRow, setExpandedRow] = useState<number | null>(null);
-  const [selectedRow, setSelectedRow] = useState<number | null>(null);
-  const [completionModal, setCompletionModal] = useState<CompletionModalState | null>(null);
-  const [showGuideDiagrams, setShowGuideDiagrams] = useState(true);
-  const [activeGuideLesson, setActiveGuideLesson] = useState<(QuickReferenceItem & { groupTitle?: string }) | null>(null);
+  const search = useSearchParams();
+  const store = useStore();
+  const project = store.getProject(id);
 
-  useEffect(() => {
-    completedRef.current = chart?.completedCells ?? {};
-  }, [chart?.completedCells]);
-
-  const isChartActive = useCallback(
-    (row: number, col: number) =>
-      chart ? isActiveChartCell(chart.shapeKey, chart.rowShaping, row, col, chart.width, chart.height) : false,
-    [chart]
-  );
-
-  const drawTracker = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !chart) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    canvas.width = chart.width * CELL_SIZE;
-    canvas.height = chart.height * CELL_SIZE;
-
-    const completed = completedRef.current;
-
-    for (let row = 0; row < chart.height; row++) {
-      for (let col = 0; col < chart.width; col++) {
-        const x = col * CELL_SIZE;
-        const y = row * CELL_SIZE;
-        const active = isChartActive(row, col);
-
-        if (!active) {
-          ctx.fillStyle = "#ece6df";
-          ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE);
-          ctx.strokeStyle = "rgba(139,99,71,0.06)";
-          ctx.lineWidth = 0.5;
-          ctx.strokeRect(x, y, CELL_SIZE, CELL_SIZE);
-          ctx.strokeStyle = "#ddd8d0";
-          ctx.lineWidth = 0.8;
-          ctx.beginPath();
-          ctx.moveTo(x + 3, y + 3);
-          ctx.lineTo(x + CELL_SIZE - 3, y + CELL_SIZE - 3);
-          ctx.moveTo(x + CELL_SIZE - 3, y + 3);
-          ctx.lineTo(x + 3, y + CELL_SIZE - 3);
-          ctx.stroke();
-          continue;
-        }
-
-        const colorIdx = chart.cells[row]?.[col]?.colorIndex ?? 0;
-        ctx.fillStyle = chart.colors[colorIdx] ?? "#f5ede0";
-        ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE);
-
-        ctx.strokeStyle = "rgba(139,99,71,0.12)";
-        ctx.lineWidth = 0.5;
-        ctx.strokeRect(x, y, CELL_SIZE, CELL_SIZE);
-
-        if (completed[`${row},${col}`]) {
-          ctx.fillStyle = "rgba(110,110,110,0.62)";
-          ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE);
-
-          ctx.strokeStyle = "rgba(255,255,255,0.75)";
-          ctx.lineWidth = 1.5;
-          ctx.lineCap = "round";
-          ctx.lineJoin = "round";
-          ctx.beginPath();
-          ctx.moveTo(x + 4, y + CELL_SIZE / 2);
-          ctx.lineTo(x + CELL_SIZE / 2 - 1, y + CELL_SIZE - 5);
-          ctx.lineTo(x + CELL_SIZE - 4, y + 4);
-          ctx.stroke();
-        }
-      }
-    }
-  }, [chart, isChartActive]);
-
-  const drawRowView = useCallback((rowOverride?: number) => {
-    const canvas = rowCanvasRef.current;
-    const row = rowOverride ?? selectedRow;
-    if (!canvas || !chart || row === null) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    canvas.width = chart.width * ROW_CELL_SIZE;
-    canvas.height = ROW_CELL_SIZE;
-
-    const completed = completedRef.current;
-
-    for (let col = 0; col < chart.width; col++) {
-      const x = col * ROW_CELL_SIZE;
-      const y = 0;
-      const active = isChartActive(row, col);
-
-      if (!active) {
-        ctx.fillStyle = "#ece6df";
-        ctx.fillRect(x, y, ROW_CELL_SIZE, ROW_CELL_SIZE);
-        ctx.strokeStyle = "#ddd8d0";
-        ctx.lineWidth = 0.8;
-        ctx.beginPath();
-        ctx.moveTo(x + 4, y + 4);
-        ctx.lineTo(x + ROW_CELL_SIZE - 4, y + ROW_CELL_SIZE - 4);
-        ctx.moveTo(x + ROW_CELL_SIZE - 4, y + 4);
-        ctx.lineTo(x + 4, y + ROW_CELL_SIZE - 4);
-        ctx.stroke();
-        continue;
-      }
-
-      const colorIdx = chart.cells[row]?.[col]?.colorIndex ?? 0;
-      ctx.fillStyle = chart.colors[colorIdx] ?? "#f5ede0";
-      ctx.fillRect(x, y, ROW_CELL_SIZE, ROW_CELL_SIZE);
-
-      ctx.strokeStyle = "rgba(139,99,71,0.12)";
-      ctx.lineWidth = 0.5;
-      ctx.strokeRect(x, y, ROW_CELL_SIZE, ROW_CELL_SIZE);
-
-      if (completed[`${row},${col}`]) {
-        ctx.fillStyle = "rgba(110,110,110,0.62)";
-        ctx.fillRect(x, y, ROW_CELL_SIZE, ROW_CELL_SIZE);
-
-        ctx.strokeStyle = "rgba(255,255,255,0.80)";
-        ctx.lineWidth = 2;
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-        ctx.beginPath();
-        ctx.moveTo(x + 5, y + ROW_CELL_SIZE / 2);
-        ctx.lineTo(x + ROW_CELL_SIZE / 2 - 1, y + ROW_CELL_SIZE - 6);
-        ctx.lineTo(x + ROW_CELL_SIZE - 5, y + 5);
-        ctx.stroke();
-      }
-    }
-  }, [chart, selectedRow, isChartActive]);
-
-  useEffect(() => { drawTracker(); }, [drawTracker]);
-  useEffect(() => { drawRowView(); }, [drawRowView]);
-  useEffect(() => {
-    void completionVersion;
-    drawTracker();
-    drawRowView();
-  }, [completionVersion, drawTracker, drawRowView]);
-
-  // Scroll the main canvas container so the selected stitch is centred in view.
-  useEffect(() => {
-    if (selectedRow === null || !canvasContainerRef.current || !canvasRef.current) return;
-    const container = canvasContainerRef.current;
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const scaleY = rect.height / Math.max(1, canvas.height);
-    const scaleX = rect.width / Math.max(1, canvas.width);
-    const bottomReserve = rowPanelRef.current?.offsetHeight ?? 0;
-    const visibleHeight = Math.max(80, container.clientHeight - bottomReserve);
-    const rowY = selectedRow * CELL_SIZE * scaleY;
-    const colX =
-      (selectedCell?.row === selectedRow ? selectedCell.col : Math.floor((chart?.width ?? 1) / 2)) *
-      CELL_SIZE *
-      scaleX;
-    const targetTop = rowY - visibleHeight / 2 + (CELL_SIZE * scaleY) / 2;
-    const targetLeft = colX - container.clientWidth / 2 + (CELL_SIZE * scaleX) / 2;
-    container.scrollTop = Math.max(0, targetTop);
-    container.scrollLeft = Math.max(0, targetLeft);
-  }, [selectedRow, selectedCell, chart?.width]);
-
-  // Keep the zoomed row scroller aligned to the stitch the user last touched.
-  useEffect(() => {
-    if (!selectedCell || selectedRow !== selectedCell.row || !rowScrollerRef.current) return;
-    const scroller = rowScrollerRef.current;
-    const targetLeft = selectedCell.col * ROW_CELL_SIZE - scroller.clientWidth / 2 + ROW_CELL_SIZE / 2;
-    scroller.scrollLeft = Math.max(0, targetLeft);
-  }, [selectedCell, selectedRow]);
-
-  // Scroll the sidebar to the selected row item
-  useEffect(() => {
-    if (selectedRow === null) return;
-    const el = rowRefs.current[selectedRow];
-    if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [selectedRow]);
-
-  const getCellAt = useCallback(
-    (e: React.MouseEvent | React.TouchEvent): { row: number; col: number } | null => {
-      const canvas = canvasRef.current;
-      if (!canvas) return null;
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
-      let cx: number, cy: number;
-      if ("touches" in e) {
-        cx = e.touches[0].clientX;
-        cy = e.touches[0].clientY;
-      } else {
-        cx = (e as React.MouseEvent).clientX;
-        cy = (e as React.MouseEvent).clientY;
-      }
-      const col = Math.floor(((cx - rect.left) * scaleX) / CELL_SIZE);
-      const row = Math.floor(((cy - rect.top) * scaleY) / CELL_SIZE);
-      if (!chart) return null;
-      if (col >= 0 && col < chart.width && row >= 0 && row < chart.height) {
-        if (!isChartActive(row, col)) return null;
-        return { row, col };
-      }
-      return null;
-    },
-    [chart, isChartActive]
-  );
-
-  const commitCompletedCells = useCallback(
-    (next: Record<string, boolean>, rowOverride?: number) => {
-      if (!chart) return;
-      const isCompleteWithCells = (target: SavedChart, cells: Record<string, boolean>) => {
-        let total = 0;
-        let done = 0;
-        for (let row = 0; row < target.height; row++) {
-          for (let col = 0; col < target.width; col++) {
-            if (!isActiveChartCell(target.shapeKey, target.rowShaping, row, col, target.width, target.height)) continue;
-            total++;
-            if (cells[`${row},${col}`]) done++;
-          }
-        }
-        return total > 0 && done === total;
-      };
-      const wasSectionDone = isCompleteWithCells(chart, completedRef.current);
-      completedRef.current = next;
-      setCompletionVersion((version) => version + 1);
-      updateChart(chart.id, { completedCells: next });
-      const updatedChart = { ...chart, completedCells: next };
-      const projectScope = chart.projectId
-        ? charts
-            .filter((candidate) => candidate.projectId === chart.projectId)
-            .map((candidate) => candidate.id === chart.id ? updatedChart : candidate)
-            .sort((a, b) => (a.sectionIndex ?? 999) - (b.sectionIndex ?? 999))
-        : [updatedChart];
-      const sectionDone = isCompleteWithCells(updatedChart, next);
-      if (!wasSectionDone && sectionDone) {
-        const allProjectDone = projectScope.every((candidate) => isCompleteWithCells(candidate, candidate.completedCells ?? {}));
-        if (allProjectDone) {
-          setCompletionModal({
-            type: "project",
-            title: "Project complete!",
-            message: "Every step and chart section is complete. Block, seam, weave in ends, and save the finished project in your library.",
-          });
-        } else {
-          const nextChart = projectScope.find((candidate) => !isCompleteWithCells(candidate, candidate.completedCells ?? {}));
-          setCompletionModal({
-            type: "step",
-            title: "Step complete",
-            message: "This section is complete. You can stay here to review it or move to the next unfinished project step.",
-            nextChartId: nextChart?.id,
-          });
-        }
-      }
-      requestAnimationFrame(() => {
-        drawTracker();
-        drawRowView(rowOverride);
-      });
-    },
-    [chart, charts, updateChart, drawTracker, drawRowView]
-  );
-
-  const setCellDone = useCallback(
-    (row: number, col: number, done: boolean) => {
-      if (!chart) return;
-      if (!isChartActive(row, col)) return;
-      const key = `${row},${col}`;
-      const next = { ...completedRef.current };
-      if (done) {
-        next[key] = true;
-      } else {
-        delete next[key];
-      }
-      commitCompletedCells(next, row);
-    },
-    [chart, commitCompletedCells, isChartActive]
-  );
-
-  const applyCell = useCallback(
-    (row: number, col: number) => {
-      const key = `${row},${col}`;
-      if (visitedCellsRef.current.has(key)) return;
-      visitedCellsRef.current.add(key);
-      setCellDone(row, col, paintModeRef.current);
-    },
-    [setCellDone]
-  );
-
-  const handlePointerDown = useCallback(
-    (e: React.MouseEvent | React.TouchEvent) => {
-      if ("touches" in e) (e as React.TouchEvent).preventDefault();
-      const pos = getCellAt(e);
-      if (!pos || !chart) return;
-      const key = `${pos.row},${pos.col}`;
-      paintModeRef.current = !completedRef.current[key];
-      visitedCellsRef.current = new Set([key]);
-      setIsPainting(true);
-      setSelectedRow(pos.row);
-      setSelectedCell(pos);
-      setCellDone(pos.row, pos.col, paintModeRef.current);
-      requestAnimationFrame(() => drawRowView(pos.row));
-    },
-    [getCellAt, chart, setCellDone, drawRowView]
-  );
-
-  const handlePointerMove = useCallback(
-    (e: React.MouseEvent | React.TouchEvent) => {
-      if (!isPainting) return;
-      if ("touches" in e) (e as React.TouchEvent).preventDefault();
-      const pos = getCellAt(e);
-      if (pos) {
-        setSelectedRow(pos.row);
-        setSelectedCell(pos);
-        applyCell(pos.row, pos.col);
-      }
-    },
-    [isPainting, getCellAt, applyCell]
-  );
-
-  const handlePointerUp = useCallback(() => {
-    setIsPainting(false);
-    visitedCellsRef.current.clear();
-  }, []);
-
-  const getRowColAt = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>): number | null => {
-      if (!chart || selectedRow === null) return null;
-      const canvas = rowCanvasRef.current;
-      if (!canvas) return null;
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / rect.width;
-      const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
-      const col = Math.floor(((clientX - rect.left) * scaleX) / ROW_CELL_SIZE);
-      if (col >= 0 && col < chart.width) {
-        if (!isChartActive(selectedRow, col)) return null;
-        return col;
-      }
-      return null;
-    },
-    [chart, selectedRow, isChartActive]
-  );
-
-  const applyRowCell = useCallback(
-    (col: number) => {
-      if (selectedRow === null) return;
-      const key = `${selectedRow},${col}`;
-      if (visitedRowCellsRef.current.has(key)) return;
-      visitedRowCellsRef.current.add(key);
-      setCellDone(selectedRow, col, rowPaintModeRef.current);
-    },
-    [selectedRow, setCellDone]
-  );
-
-  const handleRowPointerDown = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-      if ("touches" in e) e.preventDefault();
-      if (selectedRow === null) return;
-      const col = getRowColAt(e);
-      if (col === null) return;
-      const key = `${selectedRow},${col}`;
-      rowPaintModeRef.current = !completedRef.current[key];
-      visitedRowCellsRef.current = new Set([key]);
-      setIsRowPainting(true);
-      setSelectedCell({ row: selectedRow, col });
-      setCellDone(selectedRow, col, rowPaintModeRef.current);
-    },
-    [getRowColAt, selectedRow, setCellDone]
-  );
-
-  const handleRowPointerMove = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-      if (!isRowPainting) return;
-      if ("touches" in e) e.preventDefault();
-      const col = getRowColAt(e);
-      if (col !== null) {
-        if (selectedRow !== null) setSelectedCell({ row: selectedRow, col });
-        applyRowCell(col);
-      }
-    },
-    [isRowPainting, getRowColAt, applyRowCell, selectedRow]
-  );
-
-  const handleRowPointerUp = useCallback(() => {
-    setIsRowPainting(false);
-    visitedRowCellsRef.current.clear();
-  }, []);
-
-  const toggleChartRow = useCallback(
-    (rowIdx: number) => {
-      if (!chart) return;
-      const activeCols = Array.from({ length: chart.width }, (_, col) => col).filter((col) =>
-        isChartActive(rowIdx, col)
-      );
-      const allDone = activeCols.length > 0 && activeCols.every((col) => completedRef.current[`${rowIdx},${col}`]);
-      const next = { ...completedRef.current };
-      for (const col of activeCols) {
-        const key = `${rowIdx},${col}`;
-        if (allDone) {
-          delete next[key];
-        } else {
-          next[key] = true;
-        }
-      }
-      commitCompletedCells(next, rowIdx);
-      setSelectedRow(rowIdx);
-      setSelectedCell({ row: rowIdx, col: activeCols[Math.floor(activeCols.length / 2)] ?? 0 });
-      setExpandedRow(rowIdx);
-      requestAnimationFrame(() => drawRowView(rowIdx));
-    },
-    [chart, commitCompletedCells, isChartActive, drawRowView]
-  );
-
-  if (!chart) {
+  const requestedChartId = search.get("chart");
+  const saved: SavedChart | undefined = useMemo(() => {
+    if (!project) return undefined;
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 text-center px-4">
-        <div className="w-16 h-16 rounded-2xl icon-rose flex items-center justify-center shadow-lg">
-          <LayoutGridIcon />
-        </div>
-        <h2 className="text-2xl font-bold text-[#4a3f35]" style={{ fontFamily: "var(--font-lora), serif" }}>
-          Chart not found
-        </h2>
-        <p className="text-[#8b7968]">This chart may have been deleted.</p>
-        <Link href="/saved" className="mt-2 inline-flex items-center gap-2 px-5 py-2.5 bg-[#c89b7e] text-white rounded-xl font-medium text-sm hover:bg-[#a07860] transition-all shadow-md">
-          <ArrowLeft size={14} /> View My Library
-        </Link>
+      project.charts.find((c) => c.id === requestedChartId) ??
+      project.charts.find((c) => c.id === project.progress.activeChartId) ??
+      project.charts[0]
+    );
+  }, [project, requestedChartId]);
+
+  const geometry = useMemo(() => (saved ? chartGeometry(saved.chart) : null), [saved]);
+  const progress = saved && project ? project.progress.charts[saved.id] : undefined;
+
+  // Zoom lives with the reader, not with the project: how close you hold the
+  // phone is not a property of the pattern.
+  const [zoom, setZoom] = useState<number>(0);
+
+  /**
+   * The written rows for this piece.
+   *
+   * Preferred source is the project's own stored pattern: it was assembled from
+   * this very chart by `assemblePattern`, which knew the piece's REAL stitch
+   * count (a chart is clipped to a 60-stitch editing window, so regenerating
+   * from the grid alone would say "cast on 60" for a 106-stitch back). A
+   * project made in the chart editor has no written pattern, so there we
+   * regenerate and recover the true width from the panel repeat box the engine
+   * labelled.
+   */
+  const book = useMemo(() => {
+    const chart = saved?.chart;
+    if (!chart || isCrossStitchChart(chart)) return null;
+    const section = project?.pattern?.sections.find((s) => s.chartId === chart.id);
+    if (section && section.instructions.length > 1) {
+      return rowsFromWrittenInstructions(section.instructions);
+    }
+    const totalStitches = panelStitchesFromChart(chart);
+    return rowsFromChart(chart, totalStitches ? { totalStitches } : {});
+  }, [saved, project]);
+
+  const apply = useCallback(
+    (change: Parameters<typeof store.mutateChartProgress>[2]) => {
+      if (!project || !saved) return;
+      store.mutateChartProgress(project.id, saved.id, change);
+    },
+    [project, saved, store]
+  );
+
+  if (!store.loaded) {
+    return (
+      <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
+        <Loading>Opening your project</Loading>
       </div>
     );
   }
 
-  const completed = chart.completedCells ?? {};
-  const isGuideSection = chart.sectionRole === "materials" || chart.sectionRole === "prep" || chart.sectionRole === "finish";
-  const guideGroups = chart.guideGroups ?? [];
-  const guideItems = guideGroups.flatMap((group) =>
-    group.items.map((item) => ({ ...item, groupTitle: group.title }))
-  );
-  const hasGuideDiagrams = guideItems.some((item) => item.imageUrl);
-
-  // Count only active cells
-  let totalActiveCells = 0;
-  let completedCount = 0;
-  for (let r = 0; r < chart.height; r++) {
-    for (let c = 0; c < chart.width; c++) {
-      if (isChartActive(r, c)) {
-        totalActiveCells++;
-        if (completed[`${r},${c}`]) completedCount++;
-      }
-    }
+  if (!project || !saved || !geometry || !progress) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
+        <EmptyState
+          title="Nothing to track"
+          description="This project has no chart, or the link points at one that no longer exists."
+          action={<ButtonLink href="/saved">Back to library</ButtonLink>}
+        />
+      </div>
+    );
   }
-  const progress = totalActiveCells > 0 ? Math.round((completedCount / totalActiveCells) * 100) : 0;
 
-  const isRowDone = (rowIdx: number) => {
-    let active = 0;
-    for (let c = 0; c < chart.width; c++) {
-      if (!isChartActive(rowIdx, c)) continue;
-      active++;
-      if (!completed[`${rowIdx},${c}`]) return false;
-    }
-    return active > 0;
-  };
+  const view = trackerView(geometry, progress);
+  // Narrow the chart union once. `saved.chart` is a ProjectChart, and the two
+  // kinds render through different components.
+  const chart = saved.chart;
+  const stitchChart = isCrossStitchChart(chart) ? chart : null;
+  const yarnChart = isCrossStitchChart(chart) ? null : chart;
 
-  const rowActiveCount = (rowIdx: number) => {
-    let count = 0;
-    for (let c = 0; c < chart.width; c++) {
-      if (isChartActive(rowIdx, c)) count++;
-    }
-    return count;
-  };
+  // The row being worked, in words. Taken from the same book the reader below
+  // is browsing, so the panel, the voice counter and the section list can never
+  // quote three different versions of one row.
+  const currentRow = book?.rows.find((r) => r.rowNumber === view.rowNumber);
+  const instruction = currentRow
+    ? `${currentRow.label}: ${currentRow.body}.${
+        currentRow.stitchesAfter !== null ? ` (${currentRow.stitchesAfter} sts)` : ""
+      }`
+    : undefined;
 
-  const rowDoneCount = (rowIdx: number) =>
-    Array.from({ length: chart.width }, (_, col) =>
-      isChartActive(rowIdx, col) && !!completed[`${rowIdx},${col}`]
-    ).filter(Boolean).length;
-
-  const markAll = (done: boolean) => {
-    const next: Record<string, boolean> = {};
-    if (done) {
-      for (let r = 0; r < chart.height; r++)
-        for (let c = 0; c < chart.width; c++)
-          if (isChartActive(r, c))
-            next[`${r},${c}`] = true;
-    }
-    commitCompletedCells(next);
-  };
-
-  // Selected row stats
-  const selActiveCount = selectedRow !== null ? rowActiveCount(selectedRow) : 0;
-  const selDoneCount = selectedRow !== null ? rowDoneCount(selectedRow) : 0;
-  const workingRowNumber = (rowIdx: number) => isGuideSection ? rowIdx + 1 : chart.height - rowIdx;
-  const workingSideLabel = (rowIdx: number) => {
-    if (isGuideSection || chart.craftType !== "knitting") return null;
-    const rowNumber = workingRowNumber(rowIdx);
-    return rowNumber % 2 === 1
-      ? "RS row: read right to left, usually knit-facing"
-      : "WS row: read left to right, usually purl-facing";
-  };
-  const projectCharts = chart.projectId
-    ? charts
-        .filter((c) => c.projectId === chart.projectId)
-        .sort((a, b) => (a.sectionIndex ?? 999) - (b.sectionIndex ?? 999))
-    : [chart];
-  const projectIndex = projectCharts.findIndex((c) => c.id === chart.id);
-  const chartProgress = (target: typeof chart) => {
-    let total = 0;
-    let done = 0;
-    for (let r = 0; r < target.height; r++) {
-      for (let c = 0; c < target.width; c++) {
-        if (!isActiveChartCell(target.shapeKey, target.rowShaping, r, c, target.width, target.height)) continue;
-        total++;
-        if (target.completedCells?.[`${r},${c}`]) done++;
-      }
-    }
-    return total > 0 ? Math.round((done / total) * 100) : 0;
-  };
-  const displayColorIndex = (colorIndex: number) => {
-    if (colorIndex === 9 && /button band|button/i.test(chart.sectionName ?? "")) return 0;
-    if (colorIndex === 6 && chart.includeRibbing) return 0;
-    return colorIndex;
-  };
-  const usedColorIndexes = Array.from(
-    new Set(
-      Array.from({ length: chart.height }).flatMap((_, row) =>
-        Array.from({ length: chart.width })
-          .map((__, col) => {
-            if (!isChartActive(row, col)) return null;
-            return displayColorIndex(chart.cells[row]?.[col]?.colorIndex ?? 0);
-          })
-          .filter((value): value is number => value !== null)
-      )
-    )
-  ).sort((a, b) => a - b);
+  const percent = Math.round(view.fraction * 100);
 
   return (
-    <div className="min-h-screen">
-      {/* Header */}
-      <div className="bg-white/60 backdrop-blur-md border-b border-[#d4c4b0]/30 px-4 py-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-3">
-            <Link href="/saved" className="p-2 rounded-xl bg-white border border-[#e8ddd0] text-[#8b7968] hover:bg-[#f5ede6] transition-all">
-              <ArrowLeft size={18} />
-            </Link>
-            <div>
-              <h1 className="text-xl sm:text-2xl font-bold text-[#4a3f35]" style={{ fontFamily: "var(--font-lora), serif" }}>
-                {chart.projectName ?? chart.name}
-              </h1>
-              <p className="text-xs text-[#8b7968] mt-0.5">
-                {chart.sectionName ? `${chart.sectionName} - ` : ""}{chart.width} by {chart.height}. Click or drag to mark stitches.
-              </p>
-            </div>
-          </div>
-          {!isGuideSection && (
-            <Link href={`/chart-editor?load=${chart.id}`} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white border border-[#e8ddd0] text-sm text-[#8b7968] hover:bg-[#f5ede6] transition-all font-medium">
-              <PenLine size={14} /> Edit Chart
-            </Link>
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
+      <Heading
+        eyebrow={project.name}
+        title={saved.name}
+        description={`${saved.piece} · ${view.totalRows} rows · ${percent}% worked`}
+        action={
+          <ButtonLink href="/saved" variant="secondary">
+            Library
+          </ButtonLink>
+        }
+      />
+
+      {project.charts.length > 1 && (
+        <nav className="mt-7" aria-label="Pieces">
+          <p className="label mb-2.5 text-ink-faint">Pieces in this project</p>
+          <ul className="flex flex-wrap gap-2">
+            {project.charts.map((piece) => {
+              const active = piece.id === saved.id;
+              return (
+                <li key={piece.id}>
+                  <ButtonLink
+                    href={`/chart/${project.id}?chart=${piece.id}`}
+                    size="sm"
+                    variant={active ? "primary" : "secondary"}
+                    aria-current={active ? "true" : undefined}
+                  >
+                    {active && <span className="h-2 w-2 bg-panel" aria-hidden />}
+                    {piece.piece}
+                  </ButtonLink>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+      )}
+
+      <div className="mt-7 grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_23rem]">
+        <div className="space-y-5">
+          {yarnChart && <Panel title="Read this row — every step" accent="berry"><ol className="max-h-64 overflow-auto space-y-2">{geometry.rows[progress.cursor.rowIndex]?.stitches.map((st, i) => <li key={i} className={i < view.stitchesDone ? "line-through text-ink-faint" : "text-ink"}>{i + 1}. {(getSymbol(st.symbolId) ? workedForm(getSymbol(st.symbolId)!, view.side ?? "RS").instruction : undefined) ?? "Work stitch"} · colour {(st.colorIndex ?? 0) + 1}</li>)}</ol></Panel>}
+          <NowPanel
+            rowNumber={view.rowNumber}
+            totalRows={view.totalRows}
+            side={view.side}
+            stitchesDone={view.stitchesDone}
+            stitchesInRow={view.stitchesInRow}
+            remaining={view.remaining}
+            rowComplete={view.rowComplete}
+            chartComplete={view.chartComplete}
+            instruction={instruction}
+            undoText={undoLabel(progress)}
+            onIncrement={(by) => apply((p) => increment(geometry, p, by))}
+            onDecrement={(by) => apply((p) => decrement(geometry, p, by))}
+            onNextRow={() => apply((p) => gotoRow(geometry, p, view.rowNumber + 1))}
+            onPrevRow={() => apply((p) => gotoRow(geometry, p, view.rowNumber - 1))}
+            onResetRow={() => apply((p) => setCount(geometry, p, 0))}
+            onUndo={() => apply((p) => undo(p))}
+          />
+
+          {yarnChart && (
+            <Panel
+              title="This row, stitch by stitch"
+              accent="berry"
+              bodyClassName="p-3 sm:p-4"
+              action={
+                <Tag tone="neutral">
+                  Row {view.rowNumber} of {view.totalRows}
+                </Tag>
+              }
+            >
+              <RowCloseUp
+                chart={yarnChart}
+                rowIndex={view.rowIndex}
+                stitchesDone={view.stitchesDone}
+                onSelectStitch={(before) => apply((p) => setCount(geometry, p, before))}
+              />
+            </Panel>
+          )}
+
+          <Panel
+            title="Chart"
+            accent="cobalt"
+            bodyClassName="p-3 sm:p-4"
+            action={
+              <div className="flex items-center gap-2">
+                <span className="label text-panel">Zoom</span>
+                <div className="flex" role="group" aria-label="Chart zoom">
+                  {ZOOMS.map((z) => (
+                    <button
+                      key={z.value}
+                      type="button"
+                      aria-pressed={zoom === z.value}
+                      onClick={() => setZoom(z.value)}
+                      className={cn(
+                        "label h-9 w-11 border-[3px] border-ink",
+                        zoom === z.value
+                          ? "bg-ink text-panel"
+                          : "bg-panel text-ink hover:bg-gold"
+                      )}
+                    >
+                      {z.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            }
+          >
+            <ChartBoard
+              zoom={zoom}
+              activeRow={view.rowNumber}
+              totalRows={view.totalRows}
+            >
+              {stitchChart ? (
+                <CrossStitchView chart={stitchChart} cellSize={zoom || 16} completed={Object.fromEntries(geometry.rows.flatMap(r => r.stitches.slice(0, progress.rowStitches[r.rowIndex] ?? 0).map(st => [`${r.rowIndex},${st.anchorCol}`, true])))} />
+              ) : yarnChart ? (
+                <ChartView
+                  chart={yarnChart}
+                  completed={Object.fromEntries(geometry.rows.flatMap(r => r.stitches.slice(0, progress.rowStitches[r.rowIndex] ?? 0).map(st => [`${r.rowIndex},${st.anchorCol}`, true])))}
+                  cellSize={zoom || 20}
+                  activeRow={view.rowNumber}
+                  onCellClick={(row) =>
+                    apply((p) => gotoRow(geometry, p, geometry.rows[row]?.rowNumber ?? 1))
+                  }
+                />
+              ) : null}
+            </ChartBoard>
+            <p className="mt-3 text-tiny text-ink-faint">
+              Row 1 is at the bottom, as on chart paper. Tap any row to jump to
+              it.
+            </p>
+          </Panel>
+
+          {yarnChart && (
+            <Panel title="What the symbols mean" accent="grape">
+              <ChartLegend chart={yarnChart} />
+            </Panel>
           )}
         </div>
-      </div>
 
-      <div className="max-w-6xl mx-auto px-4 py-5 space-y-4">
-        {projectCharts.length > 1 && (
-          <div className="bg-white rounded-2xl shadow-lg border border-[#e8ddd0] px-5 py-4">
-            <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-              <div>
-                <h2 className="text-sm font-bold text-[#4a3f35]" style={{ fontFamily: "var(--font-lora), serif" }}>
-                  Project steps
-                </h2>
-                <p className="text-xs text-[#8b7968]">
-                  Step {projectIndex + 1} of {projectCharts.length}. Shop, start, work each chart section, then finish.
-                </p>
-              </div>
-              <div className="flex gap-2">
-                {projectCharts[projectIndex - 1] && (
-                  <Link href={`/chart/${projectCharts[projectIndex - 1].id}`} className="px-3 py-1.5 rounded-lg border border-[#e8ddd0] text-xs font-semibold text-[#8b7968] hover:bg-[#f5ede6]">
-                    Previous
-                  </Link>
-                )}
-                {projectCharts[projectIndex + 1] && (
-                  <Link href={`/chart/${projectCharts[projectIndex + 1].id}`} className="px-3 py-1.5 rounded-lg border border-[#e8ddd0] text-xs font-semibold text-[#8b7968] hover:bg-[#f5ede6]">
-                    Next
-                  </Link>
-                )}
-              </div>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
-              {projectCharts.map((sectionChart) => {
-                const sectionProgress = chartProgress(sectionChart);
-                const active = sectionChart.id === chart.id;
-                return (
-                  <Link
-                    key={sectionChart.id}
-                    href={`/chart/${sectionChart.id}`}
-                    className={`rounded-xl border px-3 py-2 transition-all ${
-                      active
-                        ? "border-[#4a3f35] bg-[#f5ede6] shadow-sm"
-                        : "border-[#e8ddd0] bg-white hover:bg-[#f8f4f0]"
-                    }`}
-                  >
-                    <div className="text-[11px] font-bold text-[#4a3f35] truncate">
-                      {sectionChart.sectionName ?? sectionChart.name}
-                    </div>
-                    <div className="mt-1 h-1.5 rounded-full bg-[#e8ddd0] overflow-hidden">
-                      <div className="h-full bg-[#6a9470]" style={{ width: `${sectionProgress}%` }} />
-                    </div>
-                    <div className="mt-1 text-[10px] text-[#8b7968]">{sectionProgress}%</div>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        <div className="space-y-5">
+          <VoiceCounter
+            rowNumber={view.rowNumber}
+            totalRows={view.totalRows}
+            stitchesDone={view.stitchesDone}
+            stitchesInRow={view.stitchesInRow}
+            instruction={instruction}
+            chart={yarnChart ?? undefined}
+            rowIndex={view.rowIndex}
+            onIncrement={(by) => apply((p) => increment(geometry, p, by))}
+            onDecrement={(by) => apply((p) => decrement(geometry, p, by))}
+            onNextRow={() => apply((p) => gotoRow(geometry, p, view.rowNumber + 1))}
+            onPrevRow={() => apply((p) => gotoRow(geometry, p, view.rowNumber - 1))}
+            onGotoRow={(row) => apply((p) => gotoRow(geometry, p, row))}
+            onSetCount={(count) => apply((p) => setCount(geometry, p, count))}
+            onResetRow={() => apply((p) => setCount(geometry, p, 0))}
+            onUndo={() => apply((p) => undo(p))}
+          />
 
-        {/* Progress bar */}
-        <div className="bg-white rounded-2xl shadow-lg border border-[#e8ddd0] px-5 py-4">
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <div>
-              <span className="text-sm font-bold text-[#4a3f35]">
-                {completedCount} of {totalActiveCells} {isGuideSection ? "steps complete" : "stitches worked"}
-              </span>
-              <span className="text-xs text-[#8b7968] ml-2">{progress}% complete</span>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => markAll(false)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-[#e8ddd0] text-xs text-[#8b7968] hover:bg-[#f5ede6] transition-all font-medium"
-              >
-                <RotateCcw size={12} /> Reset
-              </button>
-              <button
-                onClick={() => markAll(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#6a9470]/50 text-xs text-[#6a9470] hover:bg-[#6a9470]/10 transition-all font-medium"
-              >
-                <CheckCheck size={12} /> Mark all done
-              </button>
-            </div>
-          </div>
-          <div className="h-2.5 bg-[#f5ede6] rounded-full overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all duration-500"
-              style={{ width: `${progress}%`, background: "linear-gradient(90deg, #6a9470, #96c49c)" }}
-            />
-          </div>
-        </div>
-
-        {isGuideSection ? (
-          <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
-            <div className="bg-white rounded-2xl shadow-lg border border-[#e8ddd0] p-5">
-              <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-                <div>
-                  <h2 className="text-xl font-bold text-[#4a3f35]" style={{ fontFamily: "var(--font-lora), serif" }}>
-                    {chart.sectionName}
-                  </h2>
-                  <p className="text-xs text-[#8b7968]">
-                    Work these like tracker rows. Check each step when it is done, then move to the next project section.
-                  </p>
-                </div>
-                <Link
-                  href="/learn"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#251a1c] bg-[#ffd166] px-3 py-2 text-xs font-black text-[#251a1c]"
-                >
-                  <BookOpen size={14} /> Quick Learn
-                </Link>
-              </div>
-              {hasGuideDiagrams && (
-                <label className="mb-4 flex cursor-pointer items-center justify-between gap-3 rounded-lg border-2 border-[#251a1c] bg-[#fff0bf] px-3 py-2">
-                  <span>
-                    <span className="block text-xs font-black text-[#251a1c]">Show visual references</span>
-                    <span className="block text-[10px] text-[#6b5d52]">Open the visual reference on each matching step.</span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    checked={showGuideDiagrams}
-                    onChange={(e) => setShowGuideDiagrams(e.target.checked)}
-                    className="h-5 w-5 shrink-0 accent-[#2c7be5]"
-                  />
-                </label>
-              )}
-              <div className="space-y-3">
-                {guideItems.map((item, index) => {
-                  const done = !!completed[`${index},0`];
+          <ProjectComments projectId={project.id} />
+          <Panel
+            title={book ? "The instructions" : "Rows"}
+            accent="fern"
+            bodyClassName="p-3 sm:p-4"
+            action={
+              <Tag tone={view.chartComplete ? "gold" : "neutral"}>
+                {view.chartComplete ? "All worked" : `${percent}% worked`}
+              </Tag>
+            }
+          >
+            {book ? (
+              /* Written rows, broken into phases with their own navigation —
+                 183 rows in one list is a wall nobody can hold their place in. */
+              <InstructionBrowser
+                book={book}
+                activeRow={view.rowNumber}
+                listHeightClass="max-h-[24rem]"
+                isRowWorked={(rowNumber) => {
+                  const rowIndex = rowIndexForNumber(geometry, rowNumber);
+                  if (rowIndex === null) return false;
+                  const row = geometry.rows[rowIndex];
                   return (
-                    <div
-                      key={`${item.groupTitle}-${item.title}-${index}`}
-                      className={`w-full rounded-xl border p-4 transition-all ${
-                        done
-                          ? "border-[#6a9470] bg-[#6a9470]/10"
-                          : "border-[#e8ddd0] bg-[#fffaf0] hover:border-[#251a1c]"
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setCellDone(index, 0, !done)}
-                        className="w-full text-left"
-                      >
-                        <div className="flex items-start gap-3">
-                        <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 ${
-                          done ? "bg-[#6a9470] border-[#6a9470] text-white" : "border-[#c4a07e] bg-white text-transparent"
-                        }`}>
-                          <Check size={14} strokeWidth={3} />
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block text-[10px] font-black uppercase tracking-wide text-[#8b6f47]">
-                            {item.groupTitle} / Step {index + 1}
-                          </span>
-                          <span className="mt-1 flex items-center gap-2 text-sm font-black text-[#251a1c]">
-                            {item.colorHex && (
-                              <span
-                                className="h-5 w-5 shrink-0 rounded border-2 border-[#251a1c]"
-                                style={{ backgroundColor: item.colorHex }}
-                                aria-hidden
-                              />
-                            )}
-                            <span>{item.title}</span>
-                          </span>
-                          <span className="mt-1 block text-xs leading-relaxed text-[#6b5d52]">{item.detail}</span>
-                        </span>
-                        </div>
-                      </button>
-                      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                        {showGuideDiagrams && item.imageUrl && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={item.imageUrl}
-                            alt={`${item.title} tutorial reference`}
-                            className="h-24 w-full max-w-[220px] rounded-lg border border-[#e8ddd0] bg-white object-cover"
-                            loading="lazy"
-                          />
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => setActiveGuideLesson(item)}
-                          className="inline-flex items-center gap-1.5 self-start rounded-lg border border-[#251a1c] bg-[#fff0bf] px-3 py-2 text-xs font-black text-[#251a1c]"
-                        >
-                          <BookOpen size={13} /> Open matching lesson
-                        </button>
-                      </div>
-                    </div>
+                    !!row && row.count > 0 && stitchesDoneInRow(progress, rowIndex) >= row.count
                   );
-                })}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-2xl shadow-lg border border-[#e8ddd0] p-4 h-fit">
-              <h3 className="text-sm font-bold text-[#4a3f35] mb-2" style={{ fontFamily: "var(--font-lora), serif" }}>
-                What this step is for
-              </h3>
-              <div className="space-y-2 text-xs leading-relaxed text-[#6b5d52]">
-                <p>
-                  Shopping list gathers yarn, tools, and notions before you begin.
-                </p>
-                <p>
-                  Start here explains the cast-on or foundation row, gauge, chart direction, and ribbing when selected.
-                </p>
-                <p>
-                  Finish off gives assembly and blocking in order after the chart sections are worked.
-                </p>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="bg-[#fff0bf] rounded-2xl shadow-lg border border-[#e8ddd0] px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
-              <p className="text-xs text-[#4a3f35] font-semibold">
-                Row 1 is the bottom edge. For flat knitting, right-side rows are usually read right to left as knit-facing stitches; wrong-side rows are usually left to right as purl-facing equivalents.
-              </p>
-              <Link href="/learn" className="inline-flex items-center gap-1.5 text-xs font-black text-[#251a1c] underline">
-                <BookOpen size={13} /> Open Quick Learn
-              </Link>
-            </div>
-
-            {/* Main split layout */}
-            <div className="flex flex-col lg:flex-row gap-4" style={{ minHeight: 500 }}>
-
-          {/* Canvas panel */}
-          <div className="flex-1 bg-white rounded-2xl shadow-lg border border-[#e8ddd0] p-4 flex flex-col" style={{ maxHeight: "calc(100vh - 200px)", minHeight: 400 }}>
-            <p className="text-xs text-[#8b7968] mb-3 font-medium">
-              Click a stitch to mark it worked. Drag to mark multiple at once.
-            </p>
-            <div ref={canvasContainerRef} className="flex-1 overflow-auto">
-              <canvas
-                ref={canvasRef}
-                style={{ maxWidth: "100%", imageRendering: "pixelated", cursor: "crosshair" }}
-                className="border border-[#e8ddd0] rounded-lg touch-none select-none"
-                onMouseDown={handlePointerDown}
-                onMouseMove={handlePointerMove}
-                onMouseUp={handlePointerUp}
-                onMouseLeave={handlePointerUp}
-                onTouchStart={handlePointerDown}
-                onTouchMove={handlePointerMove}
-                onTouchEnd={handlePointerUp}
+                }}
+                onToggleRow={(rowNumber) => {
+                  const rowIndex = rowIndexForNumber(geometry, rowNumber);
+                  if (rowIndex !== null) apply((p) => toggleRow(geometry, p, rowIndex));
+                }}
+                onGotoRow={(rowNumber) => apply((p) => gotoRow(geometry, p, rowNumber))}
               />
-            </div>
-
-            {/* Selected row canvas */}
-            {selectedRow !== null && (
-              <div ref={rowPanelRef} className="mt-3 pt-3 border-t border-[#e8ddd0]">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-[#4a3f35]">
-                    Row {workingRowNumber(selectedRow)} - click or drag individual stitches
-                    {workingSideLabel(selectedRow) && (
-                      <span className="ml-2 font-semibold text-[#8b7968]">{workingSideLabel(selectedRow)}</span>
-                    )}
-                  </span>
-                  <span className="text-xs text-[#8b7968]">
-                    {selDoneCount}/{selActiveCount} worked
-                  </span>
-                </div>
-                <div ref={rowScrollerRef} className="overflow-x-auto">
-                  <canvas
-                    ref={rowCanvasRef}
-                    style={{ imageRendering: "pixelated", cursor: "pointer", height: ROW_CELL_SIZE, maxWidth: "none" }}
-                    className="border border-[#e8ddd0] rounded-lg touch-none select-none"
-                    onMouseDown={handleRowPointerDown}
-                    onMouseMove={handleRowPointerMove}
-                    onMouseUp={handleRowPointerUp}
-                    onMouseLeave={handleRowPointerUp}
-                    onTouchStart={handleRowPointerDown}
-                    onTouchMove={handleRowPointerMove}
-                    onTouchEnd={handleRowPointerUp}
-                  />
-                </div>
-              </div>
+            ) : (
+              /* A cross-stitch design has no written rows to break up: the
+                 picture IS the instruction, so the plain row ledger stands. */
+              <RowList
+                rows={geometry.rows}
+                progress={progress}
+                currentRow={view.rowNumber}
+                onToggle={(rowIndex) => apply((p) => toggleRow(geometry, p, rowIndex))}
+              />
             )}
-
-            {/* Colour legend */}
-            <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-[#e8ddd0]">
-              {usedColorIndexes.map((i) => (
-                <div key={i} className="flex items-center gap-1">
-                  <div className="w-3.5 h-3.5 rounded border border-[#e8ddd0]" style={{ backgroundColor: chart.colors[i] ?? "#f5ede0" }} />
-                  <span className="text-[10px] text-[#8b7968]">{i + 1}</span>
-                </div>
-              ))}
-              <div className="flex items-center gap-1">
-                <div className="w-3.5 h-3.5 rounded border border-[#e8ddd0] bg-gray-400 opacity-70" />
-                <span className="text-[10px] text-[#8b7968]">Worked</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Row sidebar */}
-          <div className="lg:w-72 shrink-0 bg-white rounded-2xl shadow-lg border border-[#e8ddd0] flex flex-col overflow-hidden" style={{ maxHeight: "calc(100vh - 200px)", minHeight: 300 }}>
-            <div className="px-4 py-3 border-b border-[#e8ddd0] shrink-0">
-              <h2 className="font-bold text-sm text-[#4a3f35]" style={{ fontFamily: "var(--font-lora), serif" }}>
-                Row Tracker
-              </h2>
-              <p className="text-[10px] text-[#8b7968] mt-0.5">Click a row to view it. Check to mark done.</p>
-            </div>
-            <div ref={sidebarRef} className="flex-1 overflow-y-auto divide-y divide-[#e8ddd0]">
-              {Array.from({ length: chart.height }, (_, displayIdx) => {
-                const rowIdx = chart.height - 1 - displayIdx;
-                const done = isRowDone(rowIdx);
-                const doneInRow = rowDoneCount(rowIdx);
-                const activeInRow = rowActiveCount(rowIdx);
-                const partial = doneInRow > 0 && !done;
-                const isExpanded = expandedRow === rowIdx;
-                const isSelected = selectedRow === rowIdx;
-
-                return (
-                  <div key={rowIdx} ref={(el) => { rowRefs.current[rowIdx] = el; }}>
-                    {/* Row header */}
-                    <div
-                      className={`flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors select-none ${
-                        isSelected ? "bg-[#c89b7e]/10" : done ? "bg-[#6a9470]/5" : isExpanded ? "bg-[#f5ede6]/60" : "hover:bg-[#f5ede6]/40"
-                      }`}
-                    >
-                      {/* Checkbox to mark whole row */}
-                      <button
-                        type="button"
-                        aria-label={`Toggle row ${workingRowNumber(rowIdx)}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleChartRow(rowIdx);
-                        }}
-                        className={`w-[22px] h-[22px] rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
-                          done
-                            ? "bg-[#6a9470] border-[#6a9470] text-white"
-                            : partial
-                            ? "bg-[#fff0bf] border-[#8b6f47] text-[#8b6f47]"
-                            : "bg-white border-[#c4a07e] hover:border-[#6a9470]"
-                        }`}
-                      >
-                        {(done || partial) && <Check size={13} strokeWidth={3} />}
-                      </button>
-                      {/* Row label + expand/select toggle */}
-                      <button
-                        className="flex items-center gap-1.5 flex-1 min-w-0 text-left"
-                        onClick={() => {
-                          setSelectedRow(isSelected ? null : rowIdx);
-                          setSelectedCell(isSelected ? null : { row: rowIdx, col: Math.floor(chart.width / 2) });
-                          setExpandedRow(isExpanded ? null : rowIdx);
-                        }}
-                      >
-                        <span className={`text-xs font-bold w-8 shrink-0 ${done ? "text-[#8b7968]/60" : "text-[#8b7968]"}`}>
-                          R{workingRowNumber(rowIdx)}
-                        </span>
-                        {workingSideLabel(rowIdx) && (
-                          <span className="hidden xl:inline text-[9px] font-semibold text-[#8b7968]/70 w-9 shrink-0">
-                            {workingRowNumber(rowIdx) % 2 === 1 ? "RS" : "WS"}
-                          </span>
-                        )}
-                        {/* Mini colour strip */}
-                        <div className="flex flex-1 h-3.5 overflow-hidden rounded gap-px">
-                          {Array.from({ length: Math.min(chart.width, 24) }, (_, col) => {
-                            const ci = chart.cells[rowIdx]?.[col]?.colorIndex ?? 0;
-                            const active = isChartActive(rowIdx, col);
-                            return (
-                              <div
-                                key={col}
-                                className="flex-1 h-full"
-                                style={{ backgroundColor: active ? (chart.colors[ci] ?? "#f5ede0") : "#ece6df", opacity: done ? 0.4 : 1 }}
-                              />
-                            );
-                          })}
-                        </div>
-                        <span className="text-[10px] text-[#8b7968]/70 shrink-0 w-12 text-right">
-                          {doneInRow}/{activeInRow}
-                        </span>
-                        <span className="text-[#c89b7e] shrink-0">
-                          {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                        </span>
-                      </button>
-                    </div>
-
-                    {/* Expanded stitch grid */}
-                    {isExpanded && (
-                      <div className="px-3 py-2 bg-[#fdf9f5] border-t border-[#e8ddd0]">
-                        <p className="text-[9px] text-[#8b7968] mb-1.5 font-medium uppercase tracking-wide">
-                          Tap stitches to toggle
-                        </p>
-                        <div className="flex flex-wrap gap-[3px]">
-                          {Array.from({ length: chart.width }, (_, col) => {
-                            const active = isChartActive(rowIdx, col);
-                            if (!active) return (
-                              <div
-                                key={col}
-                                style={{ backgroundColor: "#ece6df" }}
-                                className="w-[18px] h-[18px] rounded-[3px] border border-black/5 shrink-0 opacity-40"
-                              />
-                            );
-                            const ci = chart.cells[rowIdx]?.[col]?.colorIndex ?? 0;
-                            const cellColor = chart.colors[ci] ?? "#f5ede0";
-                            const isDone = !!completed[`${rowIdx},${col}`];
-                            return (
-                              <button
-                                key={col}
-                                onClick={() => {
-                                  setSelectedRow(rowIdx);
-                                  setSelectedCell({ row: rowIdx, col });
-                                  setCellDone(rowIdx, col, !completed[`${rowIdx},${col}`]);
-                                }}
-                                title={`R${workingRowNumber(rowIdx)} S${col + 1}`}
-                                style={{ backgroundColor: isDone ? "#888" : cellColor }}
-                                className="w-[18px] h-[18px] rounded-[3px] border border-black/10 transition-all hover:scale-110 hover:border-[#c89b7e]/40 active:scale-95 shrink-0"
-                              />
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-            </div>
-          </>
-        )}
-      </div>
-      {completionModal && (
-        <div className="fixed inset-0 z-[70] bg-[#251a1c]/45 px-4 flex items-center justify-center">
-          <div className="relative max-w-sm w-full bg-[#fffaf0] border-[3px] border-[#251a1c] rounded-lg shadow-[8px_8px_0_#251a1c] p-6 text-center overflow-hidden">
-            {completionModal.type === "project" && (
-              <div className="confetti-strip" aria-hidden>
-                {Array.from({ length: 18 }, (_, index) => (
-                  <span key={index} style={{ left: `${(index * 17) % 100}%`, animationDelay: `${index * 0.06}s` }} />
-                ))}
-              </div>
-            )}
-            <h2 className="text-2xl font-black text-[#251a1c] mb-2" style={{ fontFamily: "var(--font-lora), serif" }}>
-              {completionModal.title}
-            </h2>
-            <p className="text-sm text-[#6b5d52] leading-relaxed mb-5">
-              {completionModal.message}
-            </p>
-            <div className="flex gap-2 justify-center">
-              <button
-                onClick={() => setCompletionModal(null)}
-                className="px-4 py-2 rounded-lg border-2 border-[#251a1c] bg-[#fffaf0] text-xs font-black text-[#251a1c]"
-              >
-                Stay here
-              </button>
-              {completionModal.type === "step" && completionModal.nextChartId ? (
-                <Link
-                  href={`/chart/${completionModal.nextChartId}`}
-                  className="px-4 py-2 rounded-lg border-2 border-[#251a1c] bg-[#ffd166] text-xs font-black text-[#251a1c]"
-                >
-                  Next step
-                </Link>
-              ) : (
-                <Link
-                  href="/generate"
-                  className="px-4 py-2 rounded-lg border-2 border-[#251a1c] bg-[#ffd166] text-xs font-black text-[#251a1c]"
-                >
-                  Start another
-                </Link>
-              )}
-            </div>
-          </div>
+          </Panel>
         </div>
-      )}
-      {activeGuideLesson && (
-        <GuideLessonModal
-          item={activeGuideLesson}
-          onClose={() => setActiveGuideLesson(null)}
-        />
-      )}
+      </div>
     </div>
   );
 }
 
-function LayoutGridIcon() {
-  return <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>;
-}
+/* -------------------------------------------------------------------------- */
+/* The row being worked — the one thing on this page that must be readable    */
+/* from where the knitting is.                                                 */
+/* -------------------------------------------------------------------------- */
 
-function guideLearnHref(title: string) {
-  const slug = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-  return slug ? `/learn#learn-${slug}` : "/learn";
-}
-
-function GuideLessonModal({
-  item,
-  onClose,
+function NowPanel({
+  rowNumber,
+  totalRows,
+  side,
+  stitchesDone,
+  stitchesInRow,
+  remaining,
+  rowComplete,
+  chartComplete,
+  instruction,
+  undoText,
+  onIncrement,
+  onDecrement,
+  onNextRow,
+  onPrevRow,
+  onResetRow,
+  onUndo,
 }: {
-  item: QuickReferenceItem & { groupTitle?: string };
-  onClose: () => void;
+  rowNumber: number;
+  totalRows: number;
+  side: "RS" | "WS" | null;
+  stitchesDone: number;
+  stitchesInRow: number;
+  remaining: number;
+  rowComplete: boolean;
+  chartComplete: boolean;
+  instruction?: string;
+  undoText: string | null;
+  onIncrement: (by: number) => void;
+  onDecrement: (by: number) => void;
+  onNextRow: () => void;
+  onPrevRow: () => void;
+  onResetRow: () => void;
+  onUndo: () => void;
 }) {
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
+  return (
+    <Panel
+      title={chartComplete ? "Finished" : rowComplete ? "Row complete" : "Working now"}
+      accent={chartComplete ? "fern" : rowComplete ? "fern" : "gold"}
+      action={
+        side && (
+          <Tag tone="neutral">
+            {side === "RS" ? "Right side facing" : "Wrong side facing"}
+          </Tag>
+        )
+      }
+    >
+      {/* One spoken summary for screen readers, updated as the count changes.
+          The visible numbers below are the same fact; announcing each button
+          separately would be unbearable mid-row. */}
+      <p aria-live="polite" className="sr-only">
+        Row {rowNumber} of {totalRows}. {stitchesDone} of {stitchesInRow}{" "}
+        stitches worked, {remaining} to go.
+      </p>
 
-  const href = item.sourceUrl ?? guideLearnHref(item.title);
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Stat
+          label="Row"
+          value={rowNumber}
+          sub={`of ${totalRows}`}
+          tone={rowComplete ? "fern" : "gold"}
+        />
+        <Stat
+          label="Stitches this row"
+          value={stitchesDone}
+          sub={remaining > 0 ? `${remaining} still to work` : "Row finished"}
+        />
+      </div>
+
+      <Meter
+        className="mt-4"
+        value={stitchesDone}
+        max={stitchesInRow}
+        tone={rowComplete ? "fern" : "gold"}
+        label="This row"
+        valueText={`${stitchesDone} of ${stitchesInRow} stitches`}
+      />
+
+      {instruction && (
+        <div className="panel-sunk mt-4 p-4">
+          <p className="label mb-2 text-ink-soft">Read this row</p>
+          <p className="text-base leading-relaxed text-ink sm:text-lg">
+            {instruction}
+          </p>
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
+        <Button
+          size="lg"
+          variant="gold"
+          onClick={() => onIncrement(1)}
+          disabled={rowComplete}
+          className="sm:col-span-2"
+        >
+          {rowComplete ? "Row complete" : "Count one stitch"}
+        </Button>
+        <Button size="md" variant="primary" onClick={onNextRow}>
+          Next row
+        </Button>
+        <Button size="md" variant="secondary" onClick={onPrevRow}>
+          Previous row
+        </Button>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-2.5">
+        <Button size="md" variant="quiet" onClick={() => onDecrement(1)}>
+          Back one
+        </Button>
+        <Button size="md" variant="quiet" onClick={onResetRow}>
+          Reset row
+        </Button>
+        <Button size="md" variant="quiet" onClick={onUndo} disabled={!undoText}>
+          Undo
+        </Button>
+      </div>
+
+      <p className="mt-3 text-tiny text-ink-faint">
+        {undoText ? `Undo will reverse: ${undoText}.` : "Nothing to undo yet."}
+      </p>
+    </Panel>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* The chart board                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Wraps the chart SVG.
+ *
+ * `Fit` shows the whole piece scaled to the column; any zoom level renders at
+ * true cell size inside a scroll box and keeps the row being worked in view.
+ * Scrolling is done in an effect rather than during render, and it only moves
+ * the scroll position — no state is set, so the React Compiler rules hold.
+ */
+function ChartBoard({
+  zoom,
+  activeRow,
+  totalRows,
+  children,
+}: {
+  zoom: number;
+  activeRow: number;
+  totalRows: number;
+  children: React.ReactNode;
+}) {
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box || zoom === 0) return;
+    // Row 1 sits at the BOTTOM of the drawing, so the row being worked is
+    // (totalRows - activeRow) rows down from the top.
+    const fromTop = (totalRows - activeRow) * zoom;
+    box.scrollTo({
+      top: Math.max(0, fromTop - box.clientHeight / 2 + zoom / 2),
+      behavior: "smooth",
+    });
+  }, [zoom, activeRow, totalRows]);
+
+  if (zoom === 0) return <div className="chart-fit">{children}</div>;
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-[#251a1c]/55 px-4"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
+      ref={boxRef}
+      className="chart-board max-h-[65vh]"
+      tabIndex={0}
+      role="region"
+      aria-label="Chart, scrollable"
     >
-      <div className="w-full max-w-xl overflow-hidden rounded-lg border-[3px] border-[#251a1c] bg-[#fffaf0] shadow-[8px_8px_0_#251a1c]">
-        <div className="flex items-center justify-between gap-3 border-b-[3px] border-[#251a1c] bg-[#ffd166] px-4 py-3">
-          <div className="min-w-0">
-            <p className="text-[10px] font-black uppercase tracking-wide text-[#6b5d52]">
-              {item.groupTitle ?? "Matching lesson"}
-            </p>
-            <h2 className="truncate text-lg font-black text-[#251a1c]">{item.title}</h2>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md border-2 border-[#251a1c] bg-[#fffaf0] p-1.5 text-[#251a1c]"
-            aria-label="Close lesson"
-          >
-            <X size={18} />
-          </button>
-        </div>
-        <div className="space-y-4 p-4">
-          {item.imageUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={item.imageUrl}
-              alt={`${item.title} reference`}
-              className="max-h-72 w-full rounded-lg border-2 border-[#251a1c] bg-white object-cover"
-            />
-          )}
-          <p className="text-sm leading-relaxed text-[#4a3a30]">{item.detail}</p>
-          <Link
-            href={href}
-            className="inline-flex items-center gap-2 rounded-lg border-2 border-[#251a1c] bg-[#fff0bf] px-4 py-2 text-xs font-black text-[#251a1c]"
-          >
-            <ExternalLink size={14} /> Open full dictionary entry
-          </Link>
-        </div>
-      </div>
+      {children}
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* The row list                                                                */
+/* -------------------------------------------------------------------------- */
+
+function RowList({
+  rows,
+  progress,
+  currentRow,
+  onToggle,
+}: {
+  rows: ReturnType<typeof chartGeometry>["rows"];
+  progress: Parameters<typeof stitchesDoneInRow>[0];
+  currentRow: number;
+  onToggle: (rowIndex: number) => void;
+}) {
+  const listRef = useRef<HTMLOListElement>(null);
+
+  useEffect(() => {
+    const current = listRef.current?.querySelector<HTMLElement>("[data-current='true']");
+    current?.scrollIntoView({ block: "center" });
+  }, [currentRow]);
+
+  return (
+    <ol
+      ref={listRef}
+      className="max-h-[26rem] space-y-2 overflow-y-auto p-1"
+      aria-label="Every row in this chart"
+    >
+      {/* Top of the list is the top of the chart: the last row worked. */}
+      {[...rows].reverse().map((row) => {
+        const done = stitchesDoneInRow(progress, row.rowIndex) >= row.count;
+        const current = row.rowNumber === currentRow;
+        return (
+          <li key={row.rowIndex}>
+            <button
+              type="button"
+              data-current={current ? "true" : undefined}
+              aria-current={current ? "true" : undefined}
+              onClick={() => onToggle(row.rowIndex)}
+              className={cn(
+                "hit flex w-full items-center gap-3 border-[3px] border-ink px-3 py-2 text-left",
+                current
+                  ? "bg-gold shadow-pop-sm"
+                  : done
+                    ? "stripe bg-panel-sunk text-ink-soft"
+                    : "bg-panel hover:bg-panel-sunk"
+              )}
+            >
+              {/* Worked / not worked is a shape as well as a shade. */}
+              <span
+                className={cn(
+                  "flex h-5 w-5 shrink-0 items-center justify-center border-[3px] border-ink",
+                  done ? "bg-fern" : "bg-panel"
+                )}
+                aria-hidden
+              >
+                {done && <span className="h-1.5 w-1.5 bg-panel" />}
+              </span>
+              <span className="label min-w-0 flex-1">
+                Row {row.rowNumber}
+                {row.side ? ` · ${row.side}` : ""}
+              </span>
+              <span className="label shrink-0 text-ink-faint">{row.count} sts</span>
+              <span className="sr-only">
+                {done ? "worked" : "not worked yet"}
+                {current ? ", current row" : ""}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ol>
   );
 }

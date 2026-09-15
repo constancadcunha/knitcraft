@@ -1,1069 +1,1212 @@
 "use client";
 
-import React, { useState, useRef, useCallback, type ChangeEvent } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useStore } from "@/lib/store";
-import type { CraftType, Difficulty, WizardConfig } from "@/types";
-import { GARMENT_TYPES, AVAILABLE_SIZES } from "@/types";
-import type { Pattern } from "@/types";
-import { GARMENT_OPTIONS, getStitchGraph } from "@/lib/craftKnowledge";
-import { createProjectChartsFromPattern } from "@/lib/chartFactory";
-import { extractNamedColours, hasMonet, hasStarryNight, inferChartPalette, designTextFromParts } from "@/lib/designIntent";
-import { imagePreviewToChart, photoPreviewToGarmentDesignChart, type ImportedChart } from "@/lib/imageChart";
-import { stitchDisplayImage } from "@/lib/stitchImages";
-import { Check, Sparkles, Upload, PenLine, Camera, Plus, Trash2, Grid2X2 } from "lucide-react";
+import { draftGarment, type ConstructionMethod } from "@/lib/garments";
+import { applyMotif, type MotifKind } from "@/lib/motif";
+import { assemblePattern } from "@/lib/pattern";
+import { createProject, createSavedChart } from "@/lib/project/factory";
+import { createChartProgress } from "@/lib/project/progress";
+import { imagePreviewToChart, type ImportedChart } from "@/lib/imageChart";
+import { GARMENT_OPTIONS } from "@/lib/craftKnowledge";
+import { FIT_PREFERENCES, type FitPreference } from "@/lib/knit";
 import { GarmentIcon } from "@/components/GarmentIcon";
+import { Button } from "@/components/ui/Button";
+import { Choice, SelectField, TextArea, TextField } from "@/components/ui/Field";
+import { Tag } from "@/components/ui/Bits";
+import { localDesignIntent } from "@/lib/ai/localIntent";
+import type { DesignIntent } from "@/lib/ai/designIntent";
+import {
+  GARMENT_CATALOG,
+  GARMENT_TYPES,
+  defaultSizeForGarment,
+  garmentSupportsSize,
+  sizesForGarment,
+  toKnitCraft,
+  type Difficulty,
+  type GarmentSize,
+  type GarmentType,
+  type YarnCraft,
+} from "@/types";
+import { cn } from "@/lib/cn";
+import {
+  defaultToolMm,
+  gaugeFromTool,
+  nearestToolMm,
+  toolOptions,
+} from "./needleGauge";
+import { accountRecords, saveRecord } from "@/lib/account";
+import ImageMotifCrop from "@/components/ImageMotifCrop";
+import { coloursPerRowFor, exactChartForPiece } from "./imageDesign";
+import ReviewStep, { type ReviewData } from "./ReviewStep";
 
-type StartingPoint = NonNullable<WizardConfig["startingPoint"]>;
-type UploadStartingPoint = Extract<StartingPoint, "photo-inspiration" | "photo-chart" | "import-chart">;
+/**
+ * HOW A DESIGN REACHES THE CHART
+ * ------------------------------
+ * The bug the user reported — "the AI is not producing anything at all, whether
+ * from giving an image or describing, it's giving a blank canvas" — was not the
+ * model failing. It was that the request only ever went out if you happened to
+ * press "Suggest a design" on step 4. Describe a jumper, press Next four times,
+ * and `intent` was still null, `motifFor` returned "plain", and you were handed
+ * an empty grid with no indication that anything had been skipped.
+ *
+ * So the design request now fires as soon as there is something to design from,
+ * it is visible while it runs, and it ALWAYS ends in a motif:
+ *
+ *   description or image ──► /api/design-intent ──► motif + palette
+ *                                   │
+ *                                   └─ fails ──► localDesignIntent(), which
+ *                                      reads the same words and picks a motif
+ *                                      deterministically. Never blank, and the
+ *                                      UI says which of the two you are looking
+ *                                      at rather than implying the model ran.
+ */
 
-function isUploadStartingPoint(value: WizardConfig["startingPoint"]): value is UploadStartingPoint {
-  return value === "photo-inspiration" || value === "photo-chart" || value === "import-chart";
+type StartMode = "describe" | "image-exact" | "image-inspired" | "maths";
+
+/** The colour counts worth offering when charting a picture exactly. */
+const COLOUR_COUNTS = [2, 3, 4, 5, 6, 8, 10, 12];
+
+interface WizardConfig {
+  mode: StartMode | null;
+  description: string;
+  imagePreview: string | null;
+  motifPreview: string | null;
+  craft: YarnCraft;
+  /**
+   * null means "nobody has chosen yet", which is what lets the AI's suggestion
+   * fill the slot without ever overwriting a choice the user made. The derived
+   * value below is what the rest of the wizard uses.
+   */
+  garment: GarmentType | null;
+  style: string;
+  size: GarmentSize | null;
+  fit: FitPreference;
+  stitchPreference: string;
+  /** Needle or hook diameter in mm — the input that replaced "stitches per 10 cm". */
+  toolMm: number;
+  /** True once the knitter says they measured a swatch; exact numbers then win. */
+  measuredSwatch: boolean;
+  stitchesPer10cm: number;
+  rowsPer10cm: number;
+  extraNotes: string;
+  /** Exact-image charting only. */
+  colourCount: number;
+  technique: "stranded" | "intarsia";
 }
 
-function isExactChartStartingPoint(value: WizardConfig["startingPoint"]): value is Extract<UploadStartingPoint, "photo-chart" | "import-chart"> {
-  return value === "photo-chart" || value === "import-chart";
-}
+const STEPS = ["Start", "Garment", "Fit", "Design", "Review"] as const;
 
-function startingPointLabel(value: WizardConfig["startingPoint"]): string {
-  if (value === "photo-inspiration") return "Photo as inspiration";
-  if (value === "photo-chart") return "Photo as exact chart";
-  if (value === "import-chart") return "Imported chart";
-  if (value === "text") return "Describe it";
-  return "Not selected";
-}
+const STITCH_FEELS = [
+  { value: "", label: "Let the design decide" },
+  { value: "plain", label: "Plain / stocking" },
+  { value: "texture", label: "Texture" },
+  { value: "cable", label: "Cables" },
+  { value: "lace", label: "Lace" },
+  { value: "colourwork", label: "Colourwork" },
+] as const;
 
-const DIFFICULTIES: { value: Difficulty; label: string; desc: string }[] = [
-  { value: "beginner", label: "Beginner", desc: "Simple stitches, minimal shaping" },
-  { value: "intermediate", label: "Intermediate", desc: "Some shaping and technique variety" },
-  { value: "advanced", label: "Advanced", desc: "Complex techniques and construction" },
-  { value: "expert", label: "Expert", desc: "Intricate lace, cables, or colourwork" },
-];
-
-const DEFAULT_PALETTE = [
-  "#f5ede0", "#8b6347", "#c9785c", "#6a9470",
-  "#9e7a8a", "#2e1f14", "#c4a07e", "#6e88a8",
-  "#e8c46a", "#ffffff",
-];
-
-const initialConfig: WizardConfig = {
-  startingPoint: null,
-  imageFile: null,
-  imagePreview: null,
-  textDescription: "",
-  craftType: "knitting",
-  garmentType: "Sweater",
-  sizes: ["M"],
-  difficulty: "intermediate",
-  extraNotes: "",
-  includeRibbing: false,
-  styleOption: "crew-neck pullover",
-  stitchPreference: "knit",
-  selectedColors: [...DEFAULT_PALETTE],
-  colorLimit: 8,
+const FIT_LABELS: Record<FitPreference, string> = {
+  negative: "Close-fitting",
+  zero: "Exact",
+  classic: "Classic",
+  relaxed: "Relaxed",
+  oversized: "Oversized",
 };
 
-function designTextForConfig(config: WizardConfig): string {
-  return designTextFromParts([
-    config.textDescription,
-    config.extraNotes,
-    config.styleOption,
-    config.garmentType,
-    config.stitchPreference,
-  ]);
+const MODE_LABELS: Record<StartMode, string> = {
+  describe: "Described in words",
+  "image-exact": "Charted from a photo",
+  "image-inspired": "Inspired by a photo",
+  maths: "Just the maths",
+};
+
+/**
+ * Map the chosen feel, then the design, onto a motif the engine can draw.
+ *
+ * The last line is the fix: when there is something to design from, the fabric
+ * is never plain. An empty chart is indistinguishable from a broken app.
+ */
+function motifFor(stitchPreference: string, intent: DesignIntent | null, hasSource: boolean): MotifKind {
+  if (stitchPreference) return stitchPreference as MotifKind;
+  if (intent) return intent.motifKind;
+  return hasSource ? "texture" : "plain";
 }
 
-function paletteWasCustomized(colors: string[]): boolean {
-  if (colors.length !== DEFAULT_PALETTE.length) return true;
-  return colors.some((color, index) => color.toLowerCase() !== DEFAULT_PALETTE[index].toLowerCase());
+/** The AI's construction, where the engine has a matching sleeve system. */
+function constructionFor(intent: DesignIntent | null): ConstructionMethod | undefined {
+  switch (intent?.construction) {
+    case "raglan":
+      return "raglan";
+    case "drop-shoulder":
+      return "dropShoulder";
+    case "set-in-sleeve":
+      return "setInSleeve";
+    default:
+      return undefined;
+  }
 }
 
-function mergePalettes(primary: string[], secondary: string[]): string[] {
-  return [...primary, ...secondary]
-    .filter(Boolean)
-    .filter((color, index, all) => all.findIndex((item) => item.toLowerCase() === color.toLowerCase()) === index)
-    .slice(0, 10);
-}
+type DesignStatus =
+  | { state: "idle" }
+  | { state: "pending" }
+  | { state: "ai"; model?: string }
+  | { state: "local"; error: string };
 
-function inferredPaletteIfSpecific(text: string): string[] {
-  const lower = text.toLowerCase();
-  const hasSpecificPalette = extractNamedColours(text).length > 0 || hasMonet(lower) || hasStarryNight(lower);
-  return hasSpecificPalette ? inferChartPalette(text) : [];
-}
-
-function imageReferenceDescription(config: WizardConfig): string {
-  return designTextFromParts([
-    config.textDescription,
-    `uploaded ${config.garmentType.toLowerCase()} garment reference photo`,
-    "extract the charted design shown on the garment: colour blocking, motifs, construction details, edge finishes, and placement",
-    "ignore the room, floor, shadows, and photo background",
-  ]);
-}
-
-function dataUrlToBase64(value: string | null): string | undefined {
-  if (!value?.startsWith("data:")) return undefined;
-  return value.split(",", 2)[1] || undefined;
-}
-
-export default function GeneratePage() {
+export default function StudioPage() {
   const router = useRouter();
-  const { savePattern, saveChart } = useStore();
-  const [step, setStep] = useState(1);
-  const [config, setConfig] = useState<WizardConfig>(initialConfig);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const store = useStore();
 
-  const handleImageUpload = useCallback((e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const uploadMode = isUploadStartingPoint(config.startingPoint) ? config.startingPoint : "photo-inspiration";
+  const [step, setStep] = useState(0);
+  const [config, setConfig] = useState<WizardConfig>({
+    mode: null,
+    description: "",
+    imagePreview: null,
+    motifPreview: null,
+    craft: "knitting",
+    garment: null,
+    style: "",
+    size: null,
+    fit: "classic",
+    stitchPreference: "",
+    toolMm: defaultToolMm("knitting"),
+    measuredSwatch: false,
+    stitchesPer10cm: 22,
+    rowsPer10cm: 30,
+    extraNotes: "",
+    colourCount: 4,
+    technique: "intarsia",
+  });
+
+  const [intent, setIntent] = useState<DesignIntent | null>(null);
+  const [design, setDesign] = useState<DesignStatus>({ state: "idle" });
+  const [imported, setImported] = useState<ImportedChart | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  /** Guards against a slow image import landing after a newer one. */
+  const importToken = useRef(0);
+  /** The inputs the last design request was made from, so we do not repeat it. */
+  const lastRequest = useRef("");
+
+  const set = <K extends keyof WizardConfig>(key: K, value: WizardConfig[K]) =>
+    setConfig((c) => ({ ...c, [key]: value }));
+
+  /* ---------------------------------------------------------------------- */
+  /* Derived values. The AI fills any slot the user has not chosen.          */
+  /* ---------------------------------------------------------------------- */
+
+  const suggestedGarment =
+    intent?.garmentType && GARMENT_CATALOG[intent.garmentType].crafts.includes(config.craft)
+      ? intent.garmentType
+      : null;
+  const garment: GarmentType = config.garment ?? suggestedGarment ?? "Sweater";
+  const aiChoseGarment = config.garment === null && suggestedGarment !== null;
+
+  const sizes = useMemo(() => sizesForGarment(garment), [garment]);
+  const suggestedSize =
+    intent?.size && garmentSupportsSize(garment, intent.size) ? intent.size : null;
+  const chosenSize = config.size && garmentSupportsSize(garment, config.size) ? config.size : null;
+  const size: GarmentSize = chosenSize ?? suggestedSize ?? defaultSizeForGarment(garment);
+  const aiChoseSize = chosenSize === null && suggestedSize !== null;
+
+  const estimate = useMemo(
+    () => gaugeFromTool(config.toolMm, config.craft),
+    [config.toolMm, config.craft]
+  );
+  const gauge = config.measuredSwatch
+    ? { stitchesPer10cm: config.stitchesPer10cm, rowsPer10cm: config.rowsPer10cm }
+    : { stitchesPer10cm: estimate.stitchesPer10cm, rowsPer10cm: estimate.rowsPer10cm };
+
+  const styles = GARMENT_OPTIONS[garment] ?? [];
+  const hasSource = config.description.trim().length > 0 || config.imagePreview !== null;
+
+  const draft = useMemo(
+    () =>
+      draftGarment({
+        garment,
+        craft: toKnitCraft(config.craft),
+        size,
+        gauge,
+        fit: config.fit,
+        yarnWeight: estimate.cyc,
+        construction: constructionFor(intent),
+        options: intent?.name ? { designName: intent.name } : undefined,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- gauge is rebuilt each render from these two numbers
+    [garment, config.craft, size, config.fit, gauge.stitchesPer10cm, gauge.rowsPer10cm, estimate.cyc, intent]
+  );
+
+  /**
+   * The charted pieces.
+   *
+   * Two routes in, chosen explicitly on step 1: the picture IS the chart, or the
+   * design draws a motif onto the piece. Either way every piece comes back with
+   * something on it.
+   */
+  const difficulty: Difficulty = intent?.skillLevel ?? (config.stitchPreference === "lace" || config.stitchPreference === "cable" ? "advanced" : ["Scarf", "Dishcloth", "Baby Blanket", "Throw Blanket"].includes(garment) && !hasSource ? "beginner" : "intermediate");
+  const charted = useMemo(() => {
+    const notes: string[] = [];
+
+    if ((config.mode === "image-exact" || config.mode === "image-inspired") && imported) {
+      const limit = coloursPerRowFor(config.technique);
+      let reduced = 0;
+      const front = draft.pieces.find(p => p.panel.name === "Front") ?? draft.pieces[0];
+      const pieces = draft.pieces.map((piece) => {
+        if (piece !== front) return { ...piece, chart: { ...piece.chart, colors: imported.colors.slice() } };
+        const result = exactChartForPiece(imported, piece.chart, { maxColoursPerRow: limit });
+        reduced = Math.max(reduced, result.rowsReduced);
+        return { ...piece, chart: result.chart };
+      });
+      if (reduced > 0) {
+        notes.push(
+          `Colours were merged on up to ${reduced} rows per piece so no row carries more than two yarns. Switch to intarsia if you want more.`
+        );
+      }
+      return { pieces, notes, motif: "image" as const };
+    }
+
+    if (intent?.motifGrid) {
+      const motif = { grid: intent.motifGrid.map(row => [...row].map(Number)), colors: intent.palette.map(p => p.hex) };
+      const front = draft.pieces.find(p => p.panel.name === "Front") ?? draft.pieces[0];
+      const pieces = draft.pieces.map(piece => piece === front ? { ...piece, chart: exactChartForPiece(motif, piece.chart, { maxColoursPerRow: coloursPerRowFor(config.technique) }).chart } : { ...piece, chart: { ...piece.chart, colors: motif.colors } });
+      return { pieces, notes: ["Review the AI-drawn motif before making it. Its drawing is fitted to the front piece."], motif: "image" as const };
+    }
+
+    const kind = motifFor(config.stitchPreference, intent, hasSource);
+    const palette = intent?.palette.map((p) => p.hex);
+    const pieces = draft.pieces.map((piece) => {
+      const { chart, applied, reason } = applyMotif(piece.chart, {
+        kind,
+        palette,
+        seed: `${intent?.name ?? garment}-${piece.panel.name}`,
+      });
+      if (!applied && kind !== "plain" && reason) {
+        notes.push(`${piece.panel.name}: ${reason}`);
+      }
+      return { ...piece, chart };
+    });
+    return { pieces, notes: [...new Set(notes)], motif: kind };
+  }, [
+    config.mode,
+    config.technique,
+    config.stitchPreference,
+    imported,
+    draft,
+    intent,
+    hasSource,
+    garment,
+  ]);
+
+  const pieces = charted.pieces;
+
+  /* ---------------------------------------------------------------------- */
+  /* Actions                                                                 */
+  /* ---------------------------------------------------------------------- */
+
+  function onCraft(next: YarnCraft) {
+    setConfig((c) => ({
+      ...c,
+      craft: next,
+      // A 4.5 mm needle and a 4.5 mm hook are different tools; keep the size
+      // the user picked but snap it to one this craft actually offers.
+      toolMm: nearestToolMm(c.toolMm, next),
+      garment:
+        c.garment && GARMENT_CATALOG[c.garment].crafts.includes(next) ? c.garment : null,
+      style: "",
+    }));
+  }
+
+  function onGarment(next: GarmentType) {
+    setConfig((c) => ({
+      ...c,
+      garment: next,
+      style: "",
+      size: c.size && garmentSupportsSize(next, c.size) ? c.size : null,
+    }));
+  }
+
+  /** Read the file, then chart it if this is the exact-image route. */
+  function readImage(file: File, mode: StartMode | null) {
     const reader = new FileReader();
     reader.onload = () => {
-      const preview = reader.result as string;
-      setConfig((c) => ({
-        ...c,
-        imageFile: file,
-        imagePreview: preview,
-        startingPoint: uploadMode,
-      }));
-      const chartPromise = isExactChartStartingPoint(uploadMode)
-        ? imagePreviewToChart(preview, {
-            maxWidth: 36,
-            maxHeight: 48,
-            maxColors: config.colorLimit,
-            crop: "none",
-          })
-        : photoPreviewToGarmentDesignChart(preview, {
-            maxWidth: 42,
-            maxHeight: 56,
-            maxColors: config.colorLimit,
-          });
-      chartPromise
-        .then((chart) => {
-          setConfig((c) => c.imagePreview === preview ? { ...c, selectedColors: chart.colors } : c);
-        })
-        .catch(() => {
-          // Keep the existing palette if the browser cannot decode this image.
-        });
+      const url = typeof reader.result === "string" ? reader.result : null;
+      setConfig((c) => ({ ...c, imagePreview: url, motifPreview: null }));
+      if (url && (mode === "image-exact" || mode === "image-inspired")) void importImage(url, config.colourCount);
     };
     reader.readAsDataURL(file);
-  }, [config.startingPoint, config.colorLimit]);
+  }
 
-  const handleGenerate = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 35000);
+  async function importImage(src: string, colours: number) {
+    const token = importToken.current + 1;
+    importToken.current = token;
+    setImporting(true);
     try {
-      let importedChart: ImportedChart | undefined;
-      let inspirationChart: ImportedChart | undefined;
-      if (config.imagePreview && isExactChartStartingPoint(config.startingPoint)) {
-        const chartFromImage = await imagePreviewToChart(config.imagePreview, {
-          maxWidth: 90,
-          maxHeight: 120,
-          maxColors: Math.max(1, config.selectedColors.length || 8),
-          crop: "none",
-        });
-        importedChart = {
-          ...chartFromImage,
-          colors: paletteWasCustomized(config.selectedColors) ? config.selectedColors : chartFromImage.colors,
-        };
-      }
-      if (config.imagePreview && config.startingPoint === "photo-inspiration") {
-        const chartFromPhoto = await photoPreviewToGarmentDesignChart(config.imagePreview, {
-          maxWidth: 110,
-          maxHeight: 132,
-          maxColors: Math.max(2, config.selectedColors.length || config.colorLimit),
-        });
-        inspirationChart = {
-          ...chartFromPhoto,
-          colors: paletteWasCustomized(config.selectedColors) ? config.selectedColors : chartFromPhoto.colors,
-        };
-      }
+      const grid = await imagePreviewToChart(src, {
+        maxColors: colours,
+        maxWidth: 72,
+        maxHeight: 96,
+      });
+      if (importToken.current === token) setImported(grid);
+    } catch {
+      if (importToken.current === token) setImported(null);
+    } finally {
+      if (importToken.current === token) setImporting(false);
+    }
+  }
 
-      const textDescription =
-        config.startingPoint === "photo-inspiration"
-          ? imageReferenceDescription(config)
-          : config.textDescription || (isExactChartStartingPoint(config.startingPoint) ? `Imported stitch chart for ${config.garmentType}` : undefined);
-      const imageBase64 =
-        config.startingPoint === "photo-inspiration" ? dataUrlToBase64(config.imagePreview) : undefined;
+  function onColourCount(count: number) {
+    setConfig((c) => ({ ...c, colourCount: count }));
+    if (config.imagePreview) void importImage(config.motifPreview ?? config.imagePreview, count);
+  }
 
-      const res = await fetch("/api/generate-pattern", {
+  /**
+   * Everything the design depends on. The garment is deliberately NOT in here:
+   * the model may suggest one, and refetching because it did would loop.
+   */
+  function signatureOf(c: WizardConfig): string {
+    return [
+      c.mode,
+      c.craft,
+      c.description.trim(),
+      c.style,
+      c.extraNotes.trim(),
+      c.stitchPreference,
+      c.imagePreview ? c.imagePreview.slice(0, 64) : "",
+    ].join("|");
+  }
+
+  /**
+   * Ask for a design. Called automatically whenever the wizard moves on from a
+   * step that could have changed what is being designed — never only from a
+   * button, which is what made the AI look dead.
+   */
+  async function requestDesign(c: WizardConfig, options: { force?: boolean } = {}) {
+    const wantsDesign = c.mode !== null && c.mode !== "maths";
+    const hasInput = c.description.trim().length > 0 || c.imagePreview !== null;
+    if (!wantsDesign || !hasInput) return;
+
+    const signature = signatureOf(c);
+    if (!options.force && signature === lastRequest.current) return;
+    lastRequest.current = signature;
+
+    const describedTo = [c.description, c.style, c.extraNotes].filter(Boolean).join(". ");
+    setDesign({ state: "pending" });
+
+    try {
+      // The photo is sent shrunk: a 4 MB phone snap is the same design brief as
+      // a 512 px one, and the larger body times out more often than it helps.
+      const imageBase64 = c.imagePreview ? await shrinkImage(c.imagePreview) : undefined;
+      const response = await fetch("/api/design-intent", {
         method: "POST",
-        signal: controller.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          craftType: config.craftType,
-          garmentType: config.garmentType,
-          sizes: config.sizes,
-          difficulty: config.difficulty,
-          includeRibbing: config.includeRibbing,
-          extraNotes: [
-            config.startingPoint === "photo-inspiration"
-              ? "The chart is extracted locally from the garment photo. Pattern text should support the visible garment design and not invent unrelated motifs."
-              : "",
-            isExactChartStartingPoint(config.startingPoint)
-              ? "The user imported an existing chart image. Pattern text should support that chart and not invent a different motif."
-              : "",
-            config.extraNotes,
-            config.styleOption ? `Style option: ${config.styleOption}.` : "",
-            config.stitchPreference ? `Preferred main stitch or fabric: ${config.stitchPreference}. Explain how this changes the finished fabric.` : "",
-            config.includeRibbing
-              ? "Include ribbing where structurally useful, such as hems, cuffs, collars, button bands, and pocket tops."
-              : "Skip decorative ribbing unless the construction truly requires it.",
-          ].filter(Boolean).join(" "),
-          textDescription,
+          craftType: c.craft,
+          garmentType: config.garment ?? garment,
+          description: describedTo,
+          stitchPreference: c.stitchPreference,
+          styleOption: c.style,
           imageBase64,
         }),
       });
-
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error ?? "Generation failed");
-
-      const pattern = data.pattern as Pattern;
-      const generatedPatternContext = [
-        pattern.notes,
-        ...(pattern.sections ?? []).flatMap((section) => [
-          section.name,
-          section.description,
-          ...(section.instructions ?? []).slice(0, 4).map((instruction) => instruction.text),
-        ]),
-      ].filter(Boolean);
-      pattern.sourceDescription = [
-        pattern.sourceDescription,
-        config.startingPoint === "photo-inspiration" ? imageReferenceDescription(config) : "",
-        isExactChartStartingPoint(config.startingPoint) ? "imported stitch chart" : "",
-        config.textDescription,
-        config.styleOption,
-        config.stitchPreference,
-        config.extraNotes,
-        ...generatedPatternContext,
-      ].filter(Boolean).join(" ");
-      const outputColors = importedChart?.colors ?? (
-        config.startingPoint === "photo-inspiration"
-          ? mergePalettes(inferredPaletteIfSpecific(pattern.sourceDescription), inspirationChart?.colors ?? config.selectedColors)
-          : inspirationChart?.colors ?? config.selectedColors
-      );
-      if (config.imagePreview) {
-        pattern.sourceImagePreview = config.imagePreview;
+      const body = await response.json();
+      if (!response.ok || !body?.intent) {
+        fallBackLocally(c, body?.error ?? `The design service answered ${response.status}.`);
+        return;
       }
-      const generatedCharts = createProjectChartsFromPattern(pattern, {
-        includeRibbing: config.includeRibbing,
-        colors: outputColors,
-        importedChart,
-        inspirationChart,
-      });
-      pattern.projectId = generatedCharts[0]?.projectId;
-      const firstActualChart = generatedCharts.find((c) => c.sectionRole === "chart");
-      pattern.firstChartId = generatedCharts[0]?.id;
-      pattern.previewImage = firstActualChart?.thumbnail ?? pattern.previewImage;
-      savePattern(pattern);
-      generatedCharts.forEach(saveChart);
-      router.push(pattern.firstChartId ? `/chart/${pattern.firstChartId}` : `/pattern/${pattern.id}`);
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        setError("Generation timed out after 35 seconds. Please try again.");
-      } else {
-        setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
-      }
-      setLoading(false);
-    } finally {
-      clearTimeout(timeoutId);
+      setIntent(body.intent as DesignIntent);
+      setDesign({ state: "ai", model: body.model });
+    } catch (error) {
+      fallBackLocally(c, error instanceof Error ? error.message : "Network error.");
     }
-  }, [config, savePattern, saveChart, router]);
+  }
 
-  const canProceedStep1 =
-    isUploadStartingPoint(config.startingPoint)
-      ? !!config.imageFile
-      : config.textDescription.trim().length > 10;
+  /** Never leave the chart blank: design it here instead, and say so. */
+  function fallBackLocally(c: WizardConfig, error: string) {
+    setIntent(
+      localDesignIntent({
+        description: [c.description, c.style, c.extraNotes].filter(Boolean).join(". "),
+        craft: c.craft,
+        garment: config.garment ?? garment,
+        stitchPreference: c.stitchPreference,
+      })
+    );
+    setDesign({ state: "local", error });
+  }
 
-  const canProceedStep2 = !!config.garmentType;
-  const canProceedStep3 = config.sizes.length > 0;
+  const canAdvance =
+    step === 0
+      ? config.mode !== null &&
+        (config.mode !== "describe" || config.description.trim().length > 0) &&
+        (config.mode === "describe" || config.mode === "maths" || config.imagePreview !== null)
+      : true;
 
-  const TOTAL_STEPS = 6;
+  function next() {
+    // Steps 0 and 3 are the two that change what is being designed.
+    if (step === 0 || step === 3) void requestDesign(config);
+    setStep((s) => Math.min(STEPS.length - 1, s + 1));
+  }
 
-  return (
-    <div className="min-h-screen py-10 px-4">
-      <div className="max-w-2xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1
-            className="text-4xl font-bold text-[#3d2b1f] mb-2"
-            style={{ fontFamily: "var(--font-playfair), serif" }}
-          >
-            Create Your Pattern
-          </h1>
-          <p className="text-[#8b6f47]">
-            Answer a few questions and we&rsquo;ll generate a complete pattern just for you.
-          </p>
-        </div>
+  function save(andThen: "library" | "work") {
+    if (!store.loaded) return;
+    setSaveError(null);
+    try {
+      const project = createProject({
+        name: intent?.name ?? `${garment} (${size})`,
+        craftType: config.craft,
+        garmentType: garment,
+        size,
+        difficulty: difficulty,
+        cyc: estimate.cyc,
+        source: {
+          kind:
+            config.mode === "image-exact" || config.mode === "image-inspired"
+              ? "image"
+              : config.description
+                ? "text"
+                : "wizard",
+          description: config.description || undefined,
+          imagePreview: config.imagePreview ?? undefined,
+        },
+        notes: intent?.designerNotes ?? "",
+      });
 
-        {/* Step progress */}
-        <StepIndicator current={step} total={TOTAL_STEPS} />
+      const charts = pieces.map((p, i) =>
+        createSavedChart({ chart: p.chart, name: p.panel.name, piece: p.panel.name, order: i })
+      );
 
-        <div className="bg-white rounded-[16px] border border-[#e8ddd0] shadow-sm p-6 sm:p-8 mt-6 fade-in">
-          {step === 1 && (
-            <Step1
-              config={config}
-              setConfig={setConfig}
-              fileInputRef={fileInputRef}
-              handleImageUpload={handleImageUpload}
-            />
-          )}
-          {step === 2 && (
-            <Step2 config={config} setConfig={setConfig} />
-          )}
-          {step === 3 && (
-            <Step3 config={config} setConfig={setConfig} />
-          )}
-          {step === 4 && (
-            <Step4 config={config} setConfig={setConfig} />
-          )}
-          {step === 5 && (
-            <Step5Colors config={config} setConfig={setConfig} />
-          )}
-          {step === 6 && (
-            <Step6Generate config={config} loading={loading} error={error} />
-          )}
+      const pattern = assemblePattern({
+        id: `${project.id}-pattern`,
+        name: project.name,
+        craftType: config.craft,
+        garmentType: garment,
+        size,
+        gauge,
+        cyc: estimate.cyc,
+        draft: { ...draft, pieces },
+        difficulty: difficulty,
+        notes: intent?.designerNotes,
+        sourceDescription: config.description || undefined,
+      });
 
-          {/* Navigation */}
-          <div className="flex justify-between mt-8 pt-6 border-t border-[#e8ddd0]">
-            <button
-              onClick={() => setStep((s) => Math.max(1, s - 1))}
-              className={`px-5 py-2.5 rounded-[10px] border border-[#e8ddd0] text-[#8b6f47] font-medium text-sm hover:bg-[#f0e8da] transition-colors ${
-                step === 1 ? "invisible" : ""
-              }`}
-            >
-              Back
-            </button>
+      void saveRecord(`checklist.${project.id}`, accountRecords()["checklist.studio"] ?? []).catch(() => {});
+      store.putProject({
+        ...project,
+        charts,
+        pattern,
+        progress: {
+          ...project.progress,
+          activeChartId: charts[0]?.id ?? null,
+          charts: Object.fromEntries(charts.map((c) => [c.id, createChartProgress(c.id)])),
+        },
+      } as typeof project);
 
-            {step < TOTAL_STEPS ? (
-              <button
-                onClick={() => {
-                  if (step === 4) {
-                    setConfig((c) => c.startingPoint === "text"
-                      ? { ...c, selectedColors: inferChartPalette(designTextForConfig(c)) }
-                      : c
-                    );
-                  }
-                  setStep((s) => s + 1);
-                }}
-                disabled={step === 1 ? !canProceedStep1 : step === 2 ? !canProceedStep2 : step === 3 ? !canProceedStep3 : false}
-                className="px-6 py-2.5 rounded-[10px] bg-[#8b6f47] hover:bg-[#6b5344] disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold text-sm transition-colors"
-              >
-                Continue
-              </button>
-            ) : (
-              <button
-                onClick={handleGenerate}
-                disabled={loading}
-                className="px-6 py-2.5 rounded-[10px] bg-[#8b6f47] hover:bg-[#6b5344] disabled:opacity-60 text-white font-semibold text-sm transition-colors flex items-center gap-2"
-              >
-                {loading ? (
-                  <>
-                    <LoadingDots /> Generating...
-                  </>
-                ) : (
-                  <><Sparkles size={14} /> Generate Pattern</>
-                )}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
+      router.push(
+        andThen === "work"
+          ? `/chart/${project.id}${charts[0] ? `?chart=${encodeURIComponent(charts[0].id)}` : ""}`
+          : `/pattern/${project.id}`
+      );
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "That combination could not be saved.");
+    }
+  }
+
+  const reviewPattern = useMemo(
+    () =>
+      assemblePattern({
+        id: "studio-preview",
+        name: intent?.name ?? `${garment} (${size})`,
+        craftType: config.craft,
+        garmentType: garment,
+        size,
+        gauge,
+        cyc: estimate.cyc,
+        draft: { ...draft, pieces },
+        difficulty: difficulty,
+        notes: intent?.designerNotes,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- gauge is rebuilt each render from these two numbers
+    [intent, garment, size, config.craft, difficulty, gauge.stitchesPer10cm, gauge.rowsPer10cm, estimate.cyc, draft, pieces]
   );
-}
 
-function StepIndicator({ current, total }: { current: number; total: number }) {
-  const labels = ["Start", "Garment", "Fabric", "Details", "Colours", "Generate"];
-  return (
-    <div className="flex items-center justify-center gap-0">
-      {Array.from({ length: total }).map((_, i) => {
-        const n = i + 1;
-        const done = n < current;
-        const active = n === current;
-        return (
-          <div key={n} className="flex items-center">
-            <div className="flex flex-col items-center gap-1">
-              <div
-                className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold transition-colors ${
-                  done
-                    ? "bg-[#7a9e7e] text-white"
-                    : active
-                    ? "bg-[#8b6f47] text-white"
-                    : "bg-[#e8ddd0] text-[#c4a882]"
-                }`}
-              >
-                {done ? <Check size={15} /> : n}
-              </div>
-              <span className={`text-xs hidden sm:block ${active ? "text-[#8b6f47] font-semibold" : "text-[#c4a882]"}`}>
-                {labels[i]}
-              </span>
-            </div>
-            {i < total - 1 && (
-              <div className={`w-16 sm:w-24 h-0.5 mx-1 mb-4 ${done ? "bg-[#7a9e7e]" : "bg-[#e8ddd0]"}`} />
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function Step1({
-  config,
-  setConfig,
-  fileInputRef,
-  handleImageUpload,
-}: {
-  config: WizardConfig;
-  setConfig: React.Dispatch<React.SetStateAction<WizardConfig>>;
-  fileInputRef: React.RefObject<HTMLInputElement | null>;
-  handleImageUpload: (e: ChangeEvent<HTMLInputElement>) => void;
-}) {
-  return (
-    <div>
-      <h2
-        className="text-2xl font-bold text-[#3d2b1f] mb-1"
-        style={{ fontFamily: "var(--font-playfair), serif" }}
-      >
-        What&rsquo;s your starting point?
-      </h2>
-      <p className="text-sm text-[#8b6f47] mb-6">
-        Pick the source first so the chart maker knows whether to extract, convert, import, or draw from words.
-      </p>
-
-      {/* Option cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-        <OptionCard
-          selected={config.startingPoint === "text"}
-          onClick={() => setConfig((c) => ({ ...c, startingPoint: "text", imageFile: null, imagePreview: null }))}
-          icon={<PenLine size={22} />}
-          title="Describe it"
-          desc="Create a chart from the motif, colours, and garment you write"
-        />
-        <OptionCard
-          selected={config.startingPoint === "photo-inspiration"}
-          onClick={() => setConfig((c) => ({ ...c, startingPoint: "photo-inspiration" }))}
-          icon={<Camera size={22} />}
-          title="Photo as inspiration"
-          desc="Read the garment in the photo and chart the design shown on it"
-        />
-        <OptionCard
-          selected={config.startingPoint === "photo-chart"}
-          onClick={() => setConfig((c) => ({ ...c, startingPoint: "photo-chart" }))}
-          icon={<Grid2X2 size={22} />}
-          title="Photo as exact chart"
-          desc="Convert the whole image into stitch cells with a colour limit"
-        />
-        <OptionCard
-          selected={config.startingPoint === "import-chart"}
-          onClick={() => setConfig((c) => ({ ...c, startingPoint: "import-chart" }))}
-          icon={<Upload size={22} />}
-          title="Import chart"
-          desc="Bring in an existing chart or grid image and keep that design"
-        />
-      </div>
-
-      {/* Image upload */}
-      {isUploadStartingPoint(config.startingPoint) && (
-        <div className="mt-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={handleImageUpload}
-          />
-          {config.imagePreview ? (
-            <div className="relative group">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={config.imagePreview}
-                alt={isExactChartStartingPoint(config.startingPoint) ? "Imported chart" : "Uploaded garment inspiration"}
-                className="w-full max-h-56 object-cover rounded-xl border border-[#e8ddd0]"
-              />
-              <button
-                onClick={() => {
-                  setConfig((c) => ({ ...c, imageFile: null, imagePreview: null }));
-                  if (fileInputRef.current) fileInputRef.current.value = "";
-                }}
-                className="absolute top-2 right-2 bg-white/90 hover:bg-white text-[#8b6f47] rounded-full w-7 h-7 flex items-center justify-center text-sm font-bold shadow transition-colors"
-              >
-                x
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full border-2 border-dashed border-[#c4a882] rounded-xl p-8 text-center hover:bg-[#f0e8da] transition-colors group"
-            >
-              <div className="flex justify-center mb-2 text-[#c4a882]"><Upload size={28} /></div>
-              <p className="text-[#8b6f47] font-medium text-sm">
-                {config.startingPoint === "photo-inspiration"
-                  ? "Click to upload a garment photo"
-                  : config.startingPoint === "photo-chart"
-                    ? "Click to upload a photo to convert"
-                    : "Click to import a chart image"}
-              </p>
-              <p className="text-[#c4a882] text-xs mt-1">JPG, PNG, WEBP up to 10MB</p>
-            </button>
-          )}
-          <p className="mt-2 text-xs text-[#8b6f47]">
-            {config.startingPoint === "photo-inspiration"
-              ? "This extracts the garment design from the photo and ignores the background."
-              : config.startingPoint === "photo-chart"
-                ? "This converts the whole photo into a stitch chart with a selectable colour count."
-                : "This keeps the imported chart design and uses it as the project chart."}
-          </p>
-        </div>
-      )}
-
-      {/* Text description */}
-      {config.startingPoint === "text" && (
-        <div>
-          <textarea
-            value={config.textDescription}
-            onChange={(e) => setConfig((c) => ({ ...c, textDescription: e.target.value }))}
-            placeholder="e.g. A cosy oversized ribbed sweater with a relaxed neckline, slightly cropped, in a warm neutral colour. Perfect for autumn days..."
-            rows={5}
-            className="w-full border border-[#e8ddd0] rounded-xl px-4 py-3 text-sm text-[#3d2b1f] placeholder:text-[#c4a882] focus:outline-none focus:border-[#8b6f47] resize-none bg-[#faf7f2]"
-          />
-          <p className="text-xs text-[#c4a882] mt-1.5">
-            {config.textDescription.length < 10
-              ? `${10 - config.textDescription.length} more characters needed`
-              : "Looking good."}
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Step2({
-  config,
-  setConfig,
-}: {
-  config: WizardConfig;
-  setConfig: React.Dispatch<React.SetStateAction<WizardConfig>>;
-}) {
-  const styleOptions = GARMENT_OPTIONS[config.garmentType] ?? [];
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2
-          className="text-2xl font-bold text-[#3d2b1f] mb-1"
-          style={{ fontFamily: "var(--font-playfair), serif" }}
-        >
-          Choose the garment
-        </h2>
-        <p className="text-sm text-[#8b6f47]">Pick the craft, garment family, and construction style first.</p>
-      </div>
-
-      {/* Craft type */}
-      <div>
-        <label className="block text-sm font-semibold text-[#3d2b1f] mb-2">Craft Type</label>
-        <div className="flex gap-3">
-          {(["knitting", "crocheting"] as CraftType[]).map((ct) => (
-            <button
-              key={ct}
-              onClick={() => setConfig((c) => ({ ...c, craftType: ct, stitchPreference: getStitchGraph(ct)[0]?.id ?? "" }))}
-              className={`flex-1 py-2.5 rounded-[10px] border text-sm font-medium capitalize transition-colors ${
-                config.craftType === ct
-                  ? "bg-[#8b6f47] border-[#8b6f47] text-white"
-                  : "border-[#e8ddd0] text-[#8b6f47] hover:bg-[#f0e8da]"
-              }`}
-            >
-              {ct === "knitting" ? "Knitting" : "Crocheting"}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Garment type */}
-      <div>
-        <label className="block text-sm font-semibold text-[#3d2b1f] mb-2">Garment Type</label>
-        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-          {GARMENT_TYPES.map((g) => (
-            <button
-              key={g}
-              onClick={() => setConfig((c) => ({ ...c, garmentType: g, styleOption: GARMENT_OPTIONS[g]?.[0] ?? "" }))}
-              className={`flex flex-col items-center gap-2 py-3 px-1 rounded-xl border-2 text-center transition-all ${
-                config.garmentType === g
-                  ? "border-[#8b6f47] bg-[#f0e8da]"
-                  : "border-[#e8ddd0] hover:border-[#c4a882] hover:bg-[#faf7f2]"
-              }`}
-            >
-              <GarmentIcon type={g} active={config.garmentType === g} className="h-12 w-14" />
-              <span className="text-[10px] font-semibold text-[#3d2b1f] leading-tight">{g}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {styleOptions.length > 0 && (
-        <div>
-          <label className="block text-sm font-semibold text-[#3d2b1f] mb-2">Garment style</label>
-          <p className="text-xs text-[#8b6f47] mb-2">Choose the silhouette and construction for your {config.garmentType.toLowerCase()}.</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {styleOptions.map((option) => (
-              <button
-                key={option}
-                onClick={() => setConfig((c) => ({ ...c, styleOption: option }))}
-                className={`text-left px-3 py-2.5 rounded-[10px] border-2 transition-colors ${
-                  config.styleOption === option
-                    ? "bg-[#fff0bf] border-[#8b6f47] text-[#251a1c]"
-                    : "border-[#e8ddd0] text-[#8b6f47] hover:bg-[#f0e8da] hover:border-[#c4a882]"
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <div className={`w-2.5 h-2.5 rounded-full shrink-0 border-2 ${config.styleOption === option ? "bg-[#8b6f47] border-[#8b6f47]" : "border-[#c4a882]"}`} />
-                  <span className="text-xs font-semibold leading-snug">{option}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Step3({
-  config,
-  setConfig,
-}: {
-  config: WizardConfig;
-  setConfig: React.Dispatch<React.SetStateAction<WizardConfig>>;
-}) {
-  const stitchGraph = getStitchGraph(config.craftType);
-
-  const toggleSize = (size: string) => {
-    setConfig((c) => ({
-      ...c,
-      sizes: c.sizes.includes(size)
-        ? c.sizes.filter((s) => s !== size)
-        : [...c.sizes, size],
-    }));
+  const reviewData: ReviewData = {
+    craft: config.craft,
+    garmentLabel: config.style || GARMENT_CATALOG[garment].label,
+    sizeLabel: `${size}${aiChoseSize ? " (chosen by the AI)" : ""}`,
+    difficulty: difficulty,
+    fitLabel: FIT_LABELS[config.fit],
+    startingPoint: config.mode ? MODE_LABELS[config.mode] : "—",
+    designLine: designLine(design, intent, charted.motif),
+    gauge,
+    gaugeFromSwatch: config.measuredSwatch,
+    toolMm: config.toolMm,
+    estimate,
+    pieces,
+    draft,
+    pattern: reviewPattern,
+    notes: charted.notes,
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2
-          className="text-2xl font-bold text-[#3d2b1f] mb-1"
-          style={{ fontFamily: "var(--font-playfair), serif" }}
-        >
-          Size and fabric
-        </h2>
-        <p className="text-sm text-[#8b6f47]">Choose sizing, skill level, stitch feel, and ribbing.</p>
+    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 sm:py-12">
+      <div className="mb-2">
+        <p className="label text-berry">Pattern studio</p>
+        <h1 className="mt-2 font-ui text-2xl uppercase leading-tight sm:text-3xl">
+          Answer a few questions
+        </h1>
+        <p className="mt-2.5 text-ink-soft">
+          Every stitch count comes out of your gauge. The AI decides how it should look, and what
+          it thinks you are making.
+        </p>
       </div>
 
-      <div>
-        <label className="block text-sm font-semibold text-[#3d2b1f] mb-2">
-          Sizes <span className="font-normal text-[#8b6f47]">(select all you need)</span>
-        </label>
-        <div className="flex flex-wrap gap-2">
-          {AVAILABLE_SIZES.map((sz) => (
-            <button
-              key={sz}
-              onClick={() => toggleSize(sz)}
-              className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
-                config.sizes.includes(sz)
-                  ? "bg-[#8b6f47] border-[#8b6f47] text-white"
-                  : "border-[#e8ddd0] text-[#8b6f47] hover:bg-[#f0e8da]"
-              }`}
-            >
-              {sz}
-            </button>
-          ))}
+      <StepBar current={step} />
+
+      {design.state === "pending" && (
+        <div className="mt-4 border-[3px] border-ink bg-gold p-3.5">
+          <p className="label text-ink">The AI is designing your {garment.toLowerCase()}…</p>
+          <p className="mt-1.5 text-sm text-ink">
+            Carry on answering — it can take up to a minute, and the design lands here when it
+            arrives.
+          </p>
         </div>
-        {config.sizes.length === 0 && (
-          <p className="text-xs text-[#d4907a] mt-1.5">Please select at least one size.</p>
+      )}
+
+      <div className="panel mt-6 p-5 sm:p-6">
+        {step === 0 && (
+          <StepStart
+            config={config}
+            set={set}
+            importing={importing}
+            imported={imported}
+            onImage={readImage}
+            onColourCount={onColourCount}
+            onCrop={(url) => { set("motifPreview", url); void importImage(url, config.colourCount); }}
+          />
+        )}
+        {step === 1 && (
+          <StepGarment
+            config={config}
+            garment={garment}
+            aiChose={aiChoseGarment}
+            styles={styles}
+            set={set}
+            onCraft={onCraft}
+            onGarment={onGarment}
+          />
+        )}
+        {step === 2 && (
+          <StepFit
+            config={config}
+            set={set}
+            sizes={sizes}
+            size={size}
+            aiChoseSize={aiChoseSize}
+            estimate={estimate}
+          />
+        )}
+        {step === 3 && (
+          <StepDesign
+            config={config}
+            set={set}
+            intent={intent}
+            design={design}
+            motif={charted.motif}
+            onAsk={() => void requestDesign(config, { force: true })}
+          />
+        )}
+        {step === 4 && <ReviewStep data={reviewData} />}
+      </div>
+
+      {saveError && (
+        <p className="mt-4 border-[3px] border-berry bg-panel p-3.5 text-sm text-berry" role="alert">
+          {saveError}
+        </p>
+      )}
+
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+        <Button
+          variant="secondary"
+          onClick={() => setStep((s) => Math.max(0, s - 1))}
+          className={cn(step === 0 && "invisible")}
+        >
+          ← Back
+        </Button>
+
+        {step < STEPS.length - 1 ? (
+          <Button size="lg" disabled={!canAdvance} onClick={next}>
+            Next →
+          </Button>
+        ) : (
+          <div className="flex flex-wrap gap-3">
+            <Button variant="secondary" size="lg" disabled={!store.loaded} onClick={() => save("library")}>
+              Save to library
+            </Button>
+            <Button size="lg" disabled={!store.loaded} onClick={() => save("work")}>
+              Save &amp; start working →
+            </Button>
+          </div>
         )}
       </div>
-
-      <div>
-        <label className="block text-sm font-semibold text-[#3d2b1f] mb-2">Difficulty</label>
-        <div className="grid grid-cols-2 gap-2">
-          {DIFFICULTIES.map((d) => (
-            <button
-              key={d.value}
-              onClick={() => setConfig((c) => ({ ...c, difficulty: d.value }))}
-              className={`text-left px-4 py-3 rounded-[10px] border transition-colors ${
-                config.difficulty === d.value
-                  ? "border-[#8b6f47] bg-[#f0e8da]"
-                  : "border-[#e8ddd0] hover:bg-[#f0e8da]"
-              }`}
-            >
-              <div className="text-sm font-semibold text-[#3d2b1f]">{d.label}</div>
-              <div className="text-xs text-[#8b6f47] mt-0.5">{d.desc}</div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div>
-        <label className="block text-sm font-semibold text-[#3d2b1f] mb-2">Main stitch feel</label>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {stitchGraph.slice(0, 6).map((stitch) => (
-            <button
-              key={stitch.id}
-              onClick={() => setConfig((c) => ({ ...c, stitchPreference: stitch.id }))}
-              className={`text-left overflow-hidden rounded-[10px] border transition-colors ${
-                config.stitchPreference === stitch.id
-                  ? "bg-[#fff0bf] border-[#251a1c]"
-                  : "border-[#e8ddd0] hover:bg-[#f0e8da]"
-              }`}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={stitchDisplayImage(stitch)} alt={stitch.name} className="h-24 w-full object-cover bg-[#fffaf0]" />
-              <span className="block px-3 py-2">
-                <span className="block text-xs font-bold text-[#3d2b1f]">{stitch.name}</span>
-                <span className="block text-[10px] leading-snug text-[#8b6f47]">{stitch.appearance}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <label className="flex items-center justify-between gap-3 rounded-xl border border-[#e8ddd0] bg-[#f0e8da] px-4 py-3 cursor-pointer">
-        <div>
-          <div className="text-sm font-semibold text-[#3d2b1f]">Add ribbing where it belongs</div>
-          <div className="text-xs text-[#8b6f47]">Hems, cuffs, collars, button bands, brim edges, and pocket tops when applicable.</div>
-        </div>
-        <input
-          type="checkbox"
-          checked={config.includeRibbing}
-          onChange={(e) => setConfig((c) => ({ ...c, includeRibbing: e.target.checked }))}
-          className="h-5 w-5 shrink-0 accent-[#4fae68]"
-        />
-      </label>
     </div>
   );
 }
 
-function Step4({
-  config,
-  setConfig,
-}: {
-  config: WizardConfig;
-  setConfig: React.Dispatch<React.SetStateAction<WizardConfig>>;
-}) {
+/** One line describing where this design came from. Never overstates the AI. */
+function designLine(design: DesignStatus, intent: DesignIntent | null, motif: string): string {
+  if (!intent) return motif === "image" ? "Charted from your photo" : "Plain, drafted by the engine";
+  if (design.state === "ai") return `${intent.name} — ${motif}, designed by the AI`;
+  if (design.state === "local") return `${intent.name} — ${motif}, drafted here from your words`;
+  return `${intent.name} — ${motif}`;
+}
+
+/**
+ * Shrink a data URL for the design request.
+ *
+ * Returns the original if anything goes wrong: a slightly-too-large image is a
+ * better outcome than no image at all.
+ */
+async function shrinkImage(dataUrl: string, maxSide = 512): Promise<string> {
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("unreadable"));
+      img.src = dataUrl;
+    });
+    const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+    if (scale >= 1) return dataUrl;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(image.width * scale);
+    canvas.height = Math.round(image.height * scale);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return dataUrl;
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.82);
+  } catch {
+    return dataUrl;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+
+function StepBar({ current }: { current: number }) {
   return (
-    <div className="space-y-6">
-      <div>
-        <h2
-          className="text-2xl font-bold text-[#3d2b1f] mb-1"
-          style={{ fontFamily: "var(--font-playfair), serif" }}
-        >
-          Design details
-        </h2>
-        <p className="text-sm text-[#8b6f47]">Tell the chart maker what should appear on the project.</p>
-      </div>
+    <ol className="mt-6 flex flex-wrap gap-2" aria-label="Progress">
+      {STEPS.map((name, i) => (
+        <li key={name} className="flex-1">
+          <div
+            className={cn(
+              "label border-[3px] border-ink px-2.5 py-2 text-center",
+              i < current
+                ? "bg-fern text-panel"
+                : i === current
+                  ? "bg-berry text-panel shadow-pop-sm"
+                  : "bg-panel text-ink-faint"
+            )}
+            aria-current={i === current ? "step" : undefined}
+          >
+            {i + 1}. {name}
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
 
-      <div>
-        <label className="block text-sm font-semibold text-[#3d2b1f] mb-2">
-          Extra notes for the chart and pattern <span className="font-normal text-[#8b6f47]">(optional)</span>
-        </label>
-        <textarea
-          value={config.extraNotes}
-          onChange={(e) => setConfig((c) => ({ ...c, extraNotes: e.target.value }))}
-          placeholder="e.g. cream body with navy lettering across the front, flower pockets, shawl collar, no ribbing on the hem..."
-          rows={6}
-          className="w-full border border-[#e8ddd0] rounded-xl px-4 py-3 text-sm text-[#3d2b1f] placeholder:text-[#c4a882] focus:outline-none focus:border-[#8b6f47] resize-none bg-[#faf7f2]"
-        />
-        <p className="text-xs text-[#8b6f47] mt-2">
-          Words like stripes, flowers, stars, checker, waves, red, blue, green, cream, pockets, collar, lettering, and buttons affect the generated chart.
-        </p>
-      </div>
+type Setter = <K extends keyof WizardConfig>(key: K, value: WizardConfig[K]) => void;
+
+function Legend({ title, hint }: { title: string; hint?: string }) {
+  return (
+    <div className="mb-5">
+      <h2 className="font-ui text-lg uppercase text-ink">{title}</h2>
+      {hint && <p className="mt-1.5 text-sm text-ink-soft">{hint}</p>}
     </div>
   );
 }
 
-function Step5Colors({
+function StepStart({
   config,
-  setConfig,
+  set,
+  importing,
+  imported,
+  onImage,
+  onColourCount,
+  onCrop,
 }: {
   config: WizardConfig;
-  setConfig: React.Dispatch<React.SetStateAction<WizardConfig>>;
+  set: Setter;
+  importing: boolean;
+  imported: ImportedChart | null;
+  onImage: (file: File, mode: StartMode | null) => void;
+  onColourCount: (count: number) => void;
+  onCrop: (src: string) => void;
 }) {
-  const [rebuildingPalette, setRebuildingPalette] = useState(false);
-
-  const updateColor = (idx: number, value: string) => {
-    setConfig((c) => {
-      const next = [...c.selectedColors];
-      next[idx] = value;
-      return { ...c, selectedColors: next };
-    });
-  };
-
-  const addColor = () => {
-    setConfig((c) => ({ ...c, selectedColors: [...c.selectedColors, "#ffffff"].slice(0, 10) }));
-  };
-
-  const deleteColor = (idx: number) => {
-    setConfig((c) => {
-      if (c.selectedColors.length <= 1) return c;
-      return { ...c, selectedColors: c.selectedColors.filter((_, index) => index !== idx) };
-    });
-  };
-
-  const rebuildFromImage = async (limit: number) => {
-    if (!config.imagePreview || !isUploadStartingPoint(config.startingPoint)) {
-      setConfig((c) => ({ ...c, colorLimit: limit }));
-      return;
-    }
-
-    setRebuildingPalette(true);
-    try {
-      const chart = isExactChartStartingPoint(config.startingPoint)
-        ? await imagePreviewToChart(config.imagePreview, {
-            maxWidth: 42,
-            maxHeight: 56,
-            maxColors: limit,
-            crop: "none",
-          })
-        : await photoPreviewToGarmentDesignChart(config.imagePreview, {
-            maxWidth: 42,
-            maxHeight: 56,
-            maxColors: limit,
-          });
-      setConfig((c) => ({ ...c, colorLimit: limit, selectedColors: chart.colors }));
-    } catch {
-      setConfig((c) => ({ ...c, colorLimit: limit }));
-    } finally {
-      setRebuildingPalette(false);
-    }
-  };
-
-  const colorLabels = [
-    "Background / main colour",
-    "Primary contrast",
-    "Second contrast",
-    "Third contrast",
-    "Fourth contrast",
-    "Dark accent",
-    "Light neutral",
-    "Cool accent",
-    "Warm accent",
-    "Light accent",
+  const options: Array<{ value: StartMode; title: string; detail: string }> = [
+    {
+      value: "describe",
+      title: "Describe it",
+      detail: "Say what you want in your own words and the AI designs it.",
+    },
+    {
+      value: "image-exact",
+      title: "Chart a photo",
+      detail: "Your picture becomes the grid, square for square, in as many colours as you choose.",
+    },
+    {
+      value: "image-inspired",
+      title: "Inspired by a photo",
+      detail: "The AI identifies the garment; the picture supplies the motif instead of a generic repeat.",
+    },
+    {
+      value: "maths",
+      title: "Just the maths",
+      detail: "Skip the design; size the pieces to fit and leave the fabric plain.",
+    },
   ];
 
+  const isImage = config.mode === "image-exact" || config.mode === "image-inspired";
+
   return (
-    <div className="space-y-5">
-      <div>
-        <h2
-          className="text-2xl font-bold text-[#3d2b1f] mb-1"
-          style={{ fontFamily: "var(--font-playfair), serif" }}
-        >
-          Choose your colours
-        </h2>
-        <p className="text-sm text-[#8b6f47]">
-          These were suggested from your description. Colour 1 is the background; the rest are used for the chart motifs. Change, add, or delete colours before generating.
-        </p>
-      </div>
-
-      {isUploadStartingPoint(config.startingPoint) && config.imagePreview && (
-        <div className="rounded-xl border-2 border-[#251a1c] bg-[#fffaf0] p-4">
-          <div className="flex items-center justify-between gap-3 mb-3">
-            <div>
-              <div className="text-sm font-black text-[#251a1c]">Image colour count</div>
-              <div className="text-xs text-[#8b6f47]">
-                {isExactChartStartingPoint(config.startingPoint)
-                  ? "Controls how many colours the exact chart conversion keeps."
-                  : "Controls how many colours the garment-photo extraction keeps."}
-              </div>
-            </div>
-            <span className="text-sm font-black text-[#251a1c]">{config.colorLimit}</span>
-          </div>
-          <input
-            type="range"
-            min={2}
-            max={10}
-            value={config.colorLimit}
-            onChange={(e) => void rebuildFromImage(Number(e.target.value))}
-            className="w-full accent-[#2c7be5]"
-          />
-          {rebuildingPalette && <p className="mt-2 text-xs font-semibold text-[#8b6f47]">Rebuilding palette...</p>}
-        </div>
-      )}
-
-      <div className="grid grid-cols-2 gap-3">
-        {config.selectedColors.map((color, idx) => (
-          <div
-            key={idx}
-            className="flex items-center gap-3 p-3 rounded-xl border-2 border-[#e8ddd0] hover:border-[#c4a882] transition-colors"
+    <div>
+      <Legend title="What's your starting point?" hint="You can change any of this later." />
+      <div className="grid gap-3 sm:grid-cols-2">
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            aria-pressed={config.mode === option.value}
+            onClick={() => set("mode", option.value)}
+            className={cn(
+              "border-[3px] border-ink p-4 text-left transition-transform",
+              config.mode === option.value
+                ? "bg-gold shadow-pop-sm"
+                : "bg-panel hover:-translate-y-0.5 hover:shadow-pop-sm"
+            )}
           >
-            <label className="cursor-pointer shrink-0">
-              <input
-                type="color"
-                value={color}
-                onChange={(e) => updateColor(idx, e.target.value)}
-                className="sr-only"
-              />
-              <div
-                className="w-10 h-10 rounded-lg border-2 border-[#251a1c]/20 shadow-sm"
-                style={{ backgroundColor: color }}
-              />
-            </label>
-            <div className="min-w-0">
-              <div className="text-xs font-bold text-[#3d2b1f]">{colorLabels[idx] ?? `Colour ${idx + 1}`}</div>
-              <div className="text-[11px] font-mono text-[#8b6f47] mt-0.5">{color}</div>
-            </div>
-            <button
-              type="button"
-              onClick={() => deleteColor(idx)}
-              disabled={config.selectedColors.length <= 1}
-              className="ml-auto rounded-lg border-2 border-[#251a1c] bg-[#fffaf0] p-1.5 text-[#8b6f47] disabled:opacity-30"
-              aria-label={`Delete colour ${idx + 1}`}
-            >
-              <Trash2 size={13} />
-            </button>
-          </div>
+            <span className="label block text-ink">{option.title}</span>
+            <span className="mt-1.5 block text-sm text-ink-soft">{option.detail}</span>
+          </button>
         ))}
       </div>
 
-      <button
-        type="button"
-        onClick={addColor}
-        disabled={config.selectedColors.length >= 10}
-        className="inline-flex items-center gap-2 rounded-xl border-2 border-[#251a1c] bg-[#fffaf0] px-4 py-2 text-xs font-black text-[#251a1c] disabled:opacity-40"
-      >
-        <Plus size={14} /> Add colour
-      </button>
+      {config.mode === "describe" && (
+        <div className="mt-5">
+          <TextArea
+            label="Describe what you want"
+            rows={4}
+            placeholder="A cosy aran jumper with big twisting cables down the front, in oatmeal, for a 4 year old"
+            value={config.description}
+            onChange={(e) => set("description", e.target.value)}
+            hint="Mention colours, motifs, shapes and who it is for — all of it reaches the chart."
+          />
+        </div>
+      )}
 
-      <p className="text-xs text-[#8b6f47] bg-[#f0e8da] rounded-xl px-4 py-3">
-        These colours replace the default palette in every chart section of your project. You can always repaint individual cells in the chart editor afterward.
-      </p>
+      {isImage && (
+        <div className="mt-5 space-y-5">
+          <div>
+            <label htmlFor="studio-photo" className="label mb-1.5 block text-ink-soft">
+              Your photo
+            </label>
+            <input
+              id="studio-photo"
+              type="file"
+              accept="image/*"
+              className="field"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) onImage(file, config.mode);
+              }}
+            />
+            {config.imagePreview && (
+              <div className="media mt-3 h-40 border-[3px] border-ink">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={config.imagePreview} alt="Your photo" />
+              </div>
+            )}
+          </div>
+
+          {config.imagePreview && <ImageMotifCrop key={config.imagePreview.slice(-100)} src={config.imagePreview} onApply={onCrop} />}
+          {isImage && (
+            <div className="space-y-4 border-t-[3px] border-ink pt-5">
+              <SelectField
+                label="How many colours?"
+                value={String(config.colourCount)}
+                onChange={(e) => onColourCount(Number(e.target.value))}
+                hint="Every extra colour is another ball of yarn and another end to weave in."
+              >
+                {COLOUR_COUNTS.map((count) => (
+                  <option key={count} value={count}>
+                    {count} colours
+                  </option>
+                ))}
+              </SelectField>
+
+              <Choice
+                label="How will you work the colours?"
+                value={config.technique}
+                options={[
+                  { value: "stranded", label: "Stranded (2 per row)" },
+                  { value: "intarsia", label: "Intarsia (no limit)" },
+                ]}
+                onChange={(next) => set("technique", next)}
+              />
+              <p className="text-sm text-ink-soft">
+                Stranded colourwork carries every colour of a row along the back of that row, so
+                two is the practical limit — rows with more are merged down to their two main
+                colours. Intarsia uses a separate small ball per block and carries nothing, so any
+                number of colours is workable.
+              </p>
+
+              {importing && <p className="text-sm text-ink-soft">Reading your picture…</p>}
+              {!importing && imported && (
+                <p className="text-sm text-ink">
+                  Charted: {imported.grid[0]?.length ?? 0} × {imported.grid.length} cells in{" "}
+                  {imported.colors.length} colours. It is resized to each piece&apos;s own stitch
+                  count on the next steps. Use the selection above to frame the motif; it is placed on the front piece.
+                </p>
+              )}
+            </div>
+          )}
+
+          {config.mode === "image-inspired" && (
+            <TextArea
+              label="Anything to add? (optional)"
+              rows={3}
+              placeholder="Like this one, but in navy and cream, and cropped"
+              value={config.description}
+              onChange={(e) => set("description", e.target.value)}
+              hint="The AI sees the photo and reads this together."
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-function Step6Generate({
+function StepGarment({
   config,
-  loading,
-  error,
+  garment,
+  aiChose,
+  styles,
+  set,
+  onCraft,
+  onGarment,
 }: {
   config: WizardConfig;
-  loading: boolean;
-  error: string | null;
+  garment: GarmentType;
+  aiChose: boolean;
+  styles: string[];
+  set: Setter;
+  onCraft: (craft: YarnCraft) => void;
+  onGarment: (garment: GarmentType) => void;
 }) {
-  return (
-    <div>
-      <h2
-        className="text-2xl font-bold text-[#3d2b1f] mb-1"
-        style={{ fontFamily: "var(--font-playfair), serif" }}
-      >
-        Ready to generate!
-      </h2>
-      <p className="text-sm text-[#8b6f47] mb-6">Here&rsquo;s what we&rsquo;re working with:</p>
+  // Only the makes this craft can actually produce: a knitted Hoop Art would be
+  // refused by `createProject` at the very last step, which is far too late.
+  const offered = GARMENT_TYPES.filter((g) => GARMENT_CATALOG[g].crafts.includes(config.craft));
 
-      {/* Summary */}
-      <div className="bg-[#f0e8da] rounded-xl p-5 space-y-2.5 mb-6">
-        <SummaryRow
-          label="Starting point"
-          value={
-            config.startingPoint === "text"
-              ? `"${config.textDescription.slice(0, 60)}${config.textDescription.length > 60 ? "..." : ""}"`
-              : startingPointLabel(config.startingPoint)
-          }
+  return (
+    <div className="space-y-6">
+      <div>
+        <Legend
+          title="Choose the garment"
+          hint="Pick the craft first — it changes what is offered."
         />
-        <SummaryRow label="Craft" value={config.craftType === "knitting" ? "Knitting" : "Crocheting"} />
-        <SummaryRow label="Garment" value={config.garmentType} />
-        {config.styleOption && <SummaryRow label="Style" value={config.styleOption} />}
-        <SummaryRow label="Sizes" value={config.sizes.join(", ")} />
-        <SummaryRow label="Difficulty" value={config.difficulty} />
-        <SummaryRow label="Ribbing" value={config.includeRibbing ? "Add where useful" : "Skip unless required"} />
-        {config.stitchPreference && <SummaryRow label="Main stitch" value={config.stitchPreference} />}
-        {config.extraNotes && <SummaryRow label="Notes" value={config.extraNotes} />}
-        {isUploadStartingPoint(config.startingPoint) && (
-          <SummaryRow label="Colour count" value={`${config.colorLimit}`} />
-        )}
-        <div className="flex items-start gap-3">
-          <span className="text-xs text-[#c4a882] font-semibold w-24 shrink-0 pt-1 uppercase tracking-wide">Colours</span>
-          <div className="flex gap-1.5 flex-wrap">
-            {config.selectedColors.map((col, i) => (
-              <div key={i} className="w-5 h-5 rounded border border-[#251a1c]/20" style={{ backgroundColor: col }} title={col} />
-            ))}
-          </div>
+        <Choice
+          label="Craft"
+          value={config.craft}
+          options={[
+            { value: "knitting", label: "Knit" },
+            { value: "crocheting", label: "Crochet" },
+          ]}
+          onChange={onCraft}
+        />
+      </div>
+
+      <div>
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <span className="label text-ink-soft">What are you making?</span>
+          {aiChose && <Tag tone="cobalt">The AI chose {garment} — tap any other to change it</Tag>}
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {offered.map((option) => {
+            const active = garment === option;
+            return (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={active}
+                onClick={() => onGarment(option)}
+                className={cn(
+                  "flex flex-col items-center gap-1.5 border-[3px] border-ink p-2.5 transition-transform",
+                  active ? "bg-gold shadow-pop-sm" : "bg-panel hover:-translate-y-0.5"
+                )}
+              >
+                <GarmentIcon type={option} active={active} className="h-10 w-10" />
+                <span className="label text-center text-ink">{option}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {loading && (
-        <div className="text-center py-8">
-          <div className="flex justify-center gap-2 mb-4">
-            <span className="loading-dot w-3 h-3 rounded-full bg-[#8b6f47]" />
-            <span className="loading-dot w-3 h-3 rounded-full bg-[#8b6f47]" />
-            <span className="loading-dot w-3 h-3 rounded-full bg-[#8b6f47]" />
+      {styles.length > 0 && (
+        <div>
+          <span className="label mb-2 block text-ink-soft">Style (optional)</span>
+          <div className="flex flex-wrap gap-2">
+            {styles.map((style) => (
+              <button
+                key={style}
+                type="button"
+                aria-pressed={config.style === style}
+                onClick={() => set("style", config.style === style ? "" : style)}
+                className={cn(
+                  "border-[3px] border-ink px-3 py-2 text-sm transition-transform",
+                  config.style === style
+                    ? "bg-cobalt text-panel shadow-pop-sm"
+                    : "bg-panel text-ink hover:-translate-y-0.5"
+                )}
+              >
+                {style}
+              </button>
+            ))}
           </div>
-          <p className="text-[#8b6f47] font-medium">Crafting your pattern...</p>
-          <p className="text-xs text-[#c4a882] mt-1">This usually takes 10-25 seconds</p>
         </div>
-      )}
-
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm">
-          <strong>Error:</strong> {error}
-        </div>
-      )}
-
-      {!loading && !error && (
-        <p className="text-sm text-[#8b6f47] text-center">
-          Click <strong>Generate Pattern</strong> below and we will build a complete pattern for you.
-        </p>
       )}
     </div>
   );
 }
 
-function SummaryRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-start gap-3">
-      <span className="text-xs text-[#c4a882] font-semibold w-24 shrink-0 pt-0.5 uppercase tracking-wide">{label}</span>
-      <span className="text-sm text-[#3d2b1f]">{value}</span>
-    </div>
-  );
-}
-
-function OptionCard({
-  selected,
-  onClick,
-  icon,
-  title,
-  desc,
+function StepFit({
+  config,
+  set,
+  sizes,
+  size,
+  aiChoseSize,
+  estimate,
 }: {
-  selected: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  title: string;
-  desc: string;
+  config: WizardConfig;
+  set: Setter;
+  sizes: readonly GarmentSize[];
+  size: GarmentSize;
+  aiChoseSize: boolean;
+  estimate: ReturnType<typeof gaugeFromTool>;
+}) {
+  const tools = toolOptions(config.craft);
+  const toolWord = config.craft === "knitting" ? "needles" : "hook";
+
+  return (
+    <div className="space-y-6">
+      <Legend
+        title="Size and fit"
+        hint="Tell us the needle or hook you'll use and we'll work the rest out roughly."
+      />
+
+      <div>
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <span className="label text-ink-soft">Size</span>
+          {aiChoseSize && <Tag tone="cobalt">The AI chose {size}</Tag>}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {sizes.map((option) => (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={size === option}
+              onClick={() => set("size", option)}
+              className={cn(
+                "press px-3 py-2",
+                size === option ? "bg-berry text-panel" : "bg-panel text-ink hover:bg-gold"
+              )}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <Choice
+        label="How should it fit?"
+        value={config.fit}
+        options={FIT_PREFERENCES.map((f) => ({ value: f, label: FIT_LABELS[f] }))}
+        onChange={(next) => set("fit", next)}
+      />
+
+      <div className="space-y-3 border-t-[3px] border-ink pt-5">
+        <SelectField
+          label={`Which ${toolWord}?`}
+          value={String(config.toolMm)}
+          onChange={(e) => set("toolMm", Number(e.target.value))}
+          hint="The size is printed on the needle or stamped on the hook."
+        >
+          {tools.map((tool) => (
+            <option key={tool.mm} value={tool.mm}>
+              {tool.label}
+            </option>
+          ))}
+        </SelectField>
+
+        <div className="border-[3px] border-ink bg-panel-sunk p-3.5">
+          <p className="text-sm text-ink">
+            That suggests <strong>{estimate.yarnName}</strong> yarn at roughly{" "}
+            <strong>
+              {estimate.stitchesPer10cm} sts and {estimate.rowsPer10cm} rows to 10 cm
+            </strong>
+            .
+          </p>
+          <p className="mt-1.5 text-sm text-ink-soft">
+            This is an estimate from the standard yarn-weight table. A swatch you knit and measure
+            yourself is more accurate — two people with the same needle and yarn can differ by two
+            stitches to 10 cm, which is about 8 cm across an adult chest.
+          </p>
+        </div>
+
+        <label className="flex items-center gap-4 rounded border-2 border-ink/20 p-4">
+          <input
+            type="checkbox"
+            className="check"
+            checked={config.measuredSwatch}
+            onChange={(e) => set("measuredSwatch", e.target.checked)}
+          />
+          <span className="text-sm text-ink">I measured a swatch — use my numbers instead</span>
+        </label>
+
+        {config.measuredSwatch && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TextField
+              label="Stitches per 10 cm"
+              type="number"
+              min={4}
+              max={60}
+              value={config.stitchesPer10cm}
+              onChange={(e) => set("stitchesPer10cm", Number(e.target.value) || 22)}
+              hint="Count them across a blocked swatch."
+            />
+            <TextField
+              label="Rows per 10 cm"
+              type="number"
+              min={4}
+              max={80}
+              value={config.rowsPer10cm}
+              onChange={(e) => set("rowsPer10cm", Number(e.target.value) || 30)}
+            />
+          </div>
+        )}
+      </div>
+
+
+    </div>
+  );
+}
+
+function StepDesign({
+  config,
+  set,
+  intent,
+  design,
+  motif,
+  onAsk,
+}: {
+  config: WizardConfig;
+  set: Setter;
+  intent: DesignIntent | null;
+  design: DesignStatus;
+  motif: string;
+  onAsk: () => void;
 }) {
   return (
-    <button
-      onClick={onClick}
-      className={`text-left p-5 rounded-xl border-2 transition-all ${
-        selected
-          ? "border-[#8b6f47] bg-[#f0e8da]"
-          : "border-[#e8ddd0] hover:border-[#c4a882] hover:bg-[#faf7f2]"
-      }`}
-    >
-      <div className="mb-2 text-[#8b6f47]">{icon}</div>
-      <div className="font-semibold text-[#3d2b1f] text-sm">{title}</div>
-      <div className="text-xs text-[#8b6f47] mt-0.5">{desc}</div>
-    </button>
-  );
-}
+    <div className="space-y-6">
+      <Legend
+        title="Design details"
+        hint="Tell the chart maker what should appear on the fabric. Leave it alone and the AI decides."
+      />
 
-function LoadingDots() {
-  return (
-    <span className="flex gap-0.5">
-      <span className="loading-dot w-1.5 h-1.5 rounded-full bg-white" />
-      <span className="loading-dot w-1.5 h-1.5 rounded-full bg-white" />
-      <span className="loading-dot w-1.5 h-1.5 rounded-full bg-white" />
-    </span>
+      <Choice
+        label="Stitch feel"
+        value={config.stitchPreference}
+        options={STITCH_FEELS.map((s) => ({ value: s.value, label: s.label }))}
+        onChange={(next) => set("stitchPreference", next)}
+      />
+
+      <TextArea
+        label="Extra notes (optional)"
+        rows={4}
+        placeholder="e.g. a large red heart on the back, striped sleeves, patch pockets…"
+        value={config.extraNotes}
+        onChange={(e) => set("extraNotes", e.target.value)}
+        hint="Colours and motifs mentioned here reach the generated chart."
+      />
+
+      <div className="space-y-4 border-t-[3px] border-ink pt-5">
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="secondary" onClick={onAsk} disabled={design.state === "pending"}>
+            {design.state === "pending" ? "Designing…" : intent ? "Ask for another" : "Ask the AI"}
+          </Button>
+          <span className="text-sm text-ink-soft">
+            {design.state === "pending"
+              ? "Working on it — this can take up to a minute."
+              : "The design is asked for automatically; this asks again."}
+          </span>
+        </div>
+
+        {design.state === "local" && (
+          <div className="border-[3px] border-ink bg-gold p-4">
+            <h3 className="label text-ink">Designed here, not by the model</h3>
+            <p className="mt-1.5 text-sm text-ink">{design.error}</p>
+            <p className="mt-1.5 text-sm text-ink">
+              Your motif and palette were worked out in the browser from the words you used, so the
+              chart below is real. Every measurement comes from the engine either way.
+            </p>
+          </div>
+        )}
+
+        {intent && (
+          <div className="panel p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="label text-ink">{intent.name}</h3>
+              {design.state === "ai" && design.model && (
+                <Tag tone="neutral">{design.model.split("/").pop()}</Tag>
+              )}
+            </div>
+            <div className="mt-2.5 flex flex-wrap gap-2">
+              <Tag tone="gold">{motif}</Tag>
+              <Tag tone="neutral">{intent.construction}</Tag>
+              {intent.garmentType && <Tag tone="cobalt">{intent.garmentType}</Tag>}
+              {intent.size && <Tag tone="cobalt">size {intent.size}</Tag>}
+            </div>
+            <p className="mt-2.5 text-sm text-ink">{intent.motifDescription}</p>
+            <ul className="mt-3 flex flex-wrap gap-2">
+              {intent.palette.map((colour) => (
+                <li
+                  key={colour.hex}
+                  className="flex items-center gap-2 border-[3px] border-ink bg-panel py-1.5 pl-1.5 pr-3"
+                >
+                  <span
+                    className="h-5 w-5 border-2 border-ink"
+                    style={{ backgroundColor: colour.hex }}
+                    aria-hidden
+                  />
+                  <span className="label text-ink">{colour.name}</span>
+                </li>
+              ))}
+            </ul>
+            {intent.designerNotes && (
+              <p className="mt-3 text-sm text-ink-soft">{intent.designerNotes}</p>
+            )}
+          </div>
+        )}
+
+        {!intent && design.state !== "pending" && config.mode === "maths" && (
+          <p className="text-sm text-ink-soft">
+            You chose to skip the design, so the fabric stays plain. Pick a stitch feel above if
+            you want something on it.
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
