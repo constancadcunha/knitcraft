@@ -68,6 +68,10 @@ export default function ChartView({
   const svgW = boardW + gutter * 2;
   const svgH = boardH;
   const scale = cellSize / ART_CELL;
+  const silhouette = useMemo(
+    () => chartSilhouette(chart, gutter, cellSize),
+    [chart, gutter, cellSize]
+  );
 
   return (
     <svg
@@ -79,6 +83,11 @@ export default function ChartView({
       role="img"
       aria-label={title ?? `${chart.name}: ${chart.width} by ${chart.height} chart`}
     >
+      <defs>
+        <clipPath id={shapeClip}>
+          <path d={silhouette.mask} />
+        </clipPath>
+      </defs>
       {chart.rows.map((row, rowIndex) => {
         // rows[0] is row 1 and belongs at the BOTTOM of the drawing.
         const y = (chart.height - 1 - rowIndex) * cellSize;
@@ -98,6 +107,7 @@ export default function ChartView({
                 height={cellSize}
                 fill="var(--color-gold)"
                 opacity="0.28"
+                clipPath={`url(#${shapeClip})`}
               />
             )}
 
@@ -160,16 +170,20 @@ export default function ChartView({
               strokeWidth={1}
             />
           ))}
-          <rect
-            x={gutter}
-            y={0}
-            width={boardW}
-            height={boardH}
-            fill="none"
-            stroke="var(--color-ink)"
-            strokeWidth={3}
-          />
         </g>
+      )}
+
+      {/* Trace the real worked cells, not the rectangular chart bounds. This
+          is what makes a sleeve read as a sleeve and a neckline as a neckline. */}
+      {showGrid && silhouette.outline && (
+        <path
+          d={silhouette.outline}
+          fill="none"
+          stroke="var(--color-ink)"
+          strokeWidth={3}
+          strokeLinejoin="miter"
+          pointerEvents="none"
+        />
       )}
 
       {chart.repeats.map((box) => {
@@ -237,8 +251,8 @@ function Group({
   return (
     <g
       opacity={done ? 0.55 : 1}
-      onClick={onCellClick ? () => onCellClick(rowIndex, group.anchorCol) : undefined}
-      style={onCellClick ? { cursor: "pointer" } : undefined}
+      onClick={onCellClick && !isNoStitch ? () => onCellClick(rowIndex, group.anchorCol) : undefined}
+      style={onCellClick && !isNoStitch ? { cursor: "pointer" } : undefined}
     >
       <rect x={x} y={y} width={width} height={cellSize} fill={isNoStitch ? "transparent" : colour} />
       {done && !isNoStitch && <path d={`M${x + cellSize * .18} ${y + cellSize * .5} l${cellSize * .22} ${cellSize * .22} l${cellSize * .4} ${-cellSize * .45}`} fill="none" stroke="var(--color-ink)" strokeWidth={Math.max(1, cellSize / 9)} />}
@@ -255,4 +269,50 @@ function Group({
       ))}
     </g>
   );
+}
+
+/**
+ * Build a compact union of worked cells for clipping, plus only the exposed
+ * edges for the garment outline. Rows are stored bottom-up but SVG is top-down,
+ * so every coordinate is converted here once.
+ */
+function chartSilhouette(chart: SymbolChart, gutter: number, cellSize: number) {
+  const worked = (row: number, col: number) =>
+    row >= 0 &&
+    row < chart.height &&
+    col >= 0 &&
+    col < chart.width &&
+    chart.rows[row]?.[col]?.symbolId !== NO_STITCH_ID;
+
+  const masks: string[] = [];
+  const edges: string[] = [];
+
+  for (let row = 0; row < chart.height; row += 1) {
+    const y = (chart.height - 1 - row) * cellSize;
+
+    // Collapse adjacent cells into one rectangle. Large blanket charts then
+    // need one mask segment per row rather than thousands of SVG nodes.
+    let runStart = -1;
+    for (let col = 0; col <= chart.width; col += 1) {
+      const active = col < chart.width && worked(row, col);
+      if (active && runStart < 0) runStart = col;
+      if (!active && runStart >= 0) {
+        const x = gutter + runStart * cellSize;
+        const width = (col - runStart) * cellSize;
+        masks.push(`M${x} ${y}h${width}v${cellSize}h-${width}Z`);
+        runStart = -1;
+      }
+    }
+
+    for (let col = 0; col < chart.width; col += 1) {
+      if (!worked(row, col)) continue;
+      const x = gutter + col * cellSize;
+      if (!worked(row + 1, col)) edges.push(`M${x} ${y}h${cellSize}`);
+      if (!worked(row - 1, col)) edges.push(`M${x} ${y + cellSize}h${cellSize}`);
+      if (!worked(row, col - 1)) edges.push(`M${x} ${y}v${cellSize}`);
+      if (!worked(row, col + 1)) edges.push(`M${x + cellSize} ${y}v${cellSize}`);
+    }
+  }
+
+  return { mask: masks.join(""), outline: edges.join("") };
 }

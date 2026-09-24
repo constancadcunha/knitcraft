@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useStore } from "@/lib/store";
 import { draftGarment, type ConstructionMethod } from "@/lib/garments";
@@ -122,6 +122,12 @@ const MODE_LABELS: Record<StartMode, string> = {
   maths: "Just the maths",
 };
 
+const DESIGN_EXAMPLES = [
+  "An oatmeal raglan sweater with a bold cable panel, relaxed fit, adult medium",
+  "A navy cardigan with cream Nordic stars, patch pockets and wooden buttons",
+  "A sage baby blanket with a simple repeating leaf texture",
+] as const;
+
 /**
  * Map the chosen feel, then the design, onto a motif the engine can draw.
  *
@@ -184,11 +190,24 @@ export default function StudioPage() {
   const [imported, setImported] = useState<ImportedChart | null>(null);
   const [importing, setImporting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [cloudAi, setCloudAi] = useState<"checking" | "ready" | "local">("checking");
 
   /** Guards against a slow image import landing after a newer one. */
   const importToken = useRef(0);
   /** The inputs the last design request was made from, so we do not repeat it. */
   const lastRequest = useRef("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/design-intent", { signal: controller.signal })
+      .then((response) => response.json())
+      .then((body) => setCloudAi(body?.configured ? "ready" : "local"))
+      .catch((error) => {
+        if (error instanceof Error && error.name === "AbortError") return;
+        setCloudAi("local");
+      });
+    return () => controller.abort();
+  }, []);
 
   const set = <K extends keyof WizardConfig>(key: K, value: WizardConfig[K]) =>
     setConfig((c) => ({ ...c, [key]: value }));
@@ -563,6 +582,22 @@ export default function StudioPage() {
 
       <StepBar current={step} />
 
+      <div className="mt-4 flex items-start gap-3 border-[3px] border-ink bg-panel p-3.5" role="status">
+        <span className={cn("mt-1 h-3 w-3 shrink-0 border-2 border-ink", cloudAi === "ready" ? "bg-fern" : cloudAi === "checking" ? "bg-gold" : "bg-cobalt")} aria-hidden />
+        <div>
+          <p className="label text-ink">
+            {cloudAi === "ready" ? "Cloud designer ready" : cloudAi === "checking" ? "Checking the designer…" : "Built-in designer ready"}
+          </p>
+          <p className="mt-1 text-sm text-ink-soft">
+            {cloudAi === "ready"
+              ? "Your words or reference image can be interpreted by the AI; all sizing maths remains in the checked pattern engine."
+              : cloudAi === "checking"
+                ? "You can keep working while this checks the server."
+                : "Cloud AI is not configured, so your words are interpreted instantly on this server. Charts and sizing still work."}
+          </p>
+        </div>
+      </div>
+
       {design.state === "pending" && (
         <div className="mt-4 border-[3px] border-ink bg-gold p-3.5">
           <p className="label text-ink">The AI is designing your {garment.toLowerCase()}…</p>
@@ -793,7 +828,7 @@ function StepStart({
       </div>
 
       {config.mode === "describe" && (
-        <div className="mt-5">
+        <div className="mt-5 space-y-3">
           <TextArea
             label="Describe what you want"
             rows={4}
@@ -802,6 +837,21 @@ function StepStart({
             onChange={(e) => set("description", e.target.value)}
             hint="Mention colours, motifs, shapes and who it is for — all of it reaches the chart."
           />
+          <div>
+            <p className="label mb-2 text-ink-faint">Need a starting point?</p>
+            <div className="grid gap-2">
+              {DESIGN_EXAMPLES.map((example) => (
+                <button
+                  key={example}
+                  type="button"
+                  className="border-2 border-ink/30 bg-panel-sunk px-3 py-2 text-left text-sm text-ink hover:border-ink hover:bg-gold"
+                  onClick={() => set("description", example)}
+                >
+                  {example}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 
@@ -1161,6 +1211,13 @@ function StepDesign({
               Your motif and palette were worked out in the browser from the words you used, so the
               chart below is real. Every measurement comes from the engine either way.
             </p>
+          </div>
+        )}
+
+        {design.state === "ai" && (
+          <div className="border-[3px] border-ink bg-fern p-4 text-panel">
+            <h3 className="label">Cloud design received</h3>
+            <p className="mt-1.5 text-sm">The AI supplied the visual direction below. The deterministic engine—not the model—calculated every measurement and stitch count.</p>
           </div>
         )}
 

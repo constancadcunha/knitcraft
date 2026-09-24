@@ -4,10 +4,10 @@ StitchCraft Studio is a full-stack Next.js app for designing, sizing, and workin
 
 ## Features
 
-- **Pattern Studio** turns a garment description or photo into a size-aware draft with materials, gauge, shaping, row instructions, and abbreviations. The deterministic drafting engine works without an AI key.
-- **Chart Editor** creates colourwork, cable, lace, and texture charts using garment-shaped templates.
+- **Pattern Studio** turns a garment description or photo into a size-aware draft with materials, gauge, shaping, row instructions, and abbreviations. It shows whether the cloud designer or the built-in deterministic designer handled the brief, and the sizing engine works without an AI key.
+- **Chart Editor** creates colourwork, cable, lace, and texture charts using garment-shaped templates. Sweater necklines, mirrored cardigan fronts, sleeve caps, hat crowns, toes, mitten tops, and shawl points are drawn as real worked-cell silhouettes rather than rectangular canvases.
 - **Project Tracker** saves row, stitch, chart, checklist, assembly, and blocking progress.
-- **Quick Learn** provides knitting and crochet technique guides, diagrams, and selected external videos.
+- **Quick Learn** provides guided beginner courses, saved progress, practice checks, knitting and crochet technique guides, prerequisites, fabric behavior, terminology warnings, diagrams, and selected external videos.
 - **Private workspace** stores projects without requiring an email address or sign-up. A private recovery code opens the same workspace on another device.
 
 ## Requirements

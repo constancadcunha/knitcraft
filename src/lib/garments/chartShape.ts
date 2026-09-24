@@ -28,7 +28,7 @@ export function shapeChart(chart: SymbolChart, panel: Panel, kind: GarmentKind, 
   }
   if (!widthAt) return chart;
   let previous = Math.max(3, Math.min(w, widthAt(0)));
-  const rows = chart.rows.map((row, r) => {
+  let rows = chart.rows.map((row, r) => {
     // Each decrease consumes two stitches; each increase creates one.
     const desired = Math.max(3, Math.min(w, widthAt!(r)));
     const count = r === 0 ? desired : Math.max(Math.ceil(previous / 2), Math.min(previous * 2, desired));
@@ -47,5 +47,47 @@ export function shapeChart(chart: SymbolChart, panel: Panel, kind: GarmentKind, 
     previous = count;
     return cells;
   });
+
+  if (torso && kind === "cardigan" && name.includes("front")) {
+    // A cardigan front narrows towards its centre opening, not towards the
+    // middle of the piece. Mirror the two fronts so they assemble visually.
+    rows = rows.map((row) => {
+      const worked = row.filter((cell) => cell.symbolId !== NO_STITCH_ID);
+      const start = name.startsWith("left") ? 0 : w - worked.length;
+      return placeWorkedCells(row, worked, Array.from({ length: worked.length }, (_, i) => start + i));
+    });
+  } else if (torso && (name === "front" || name === "back")) {
+    // The last rows are two shoulders separated by a real neck opening. Keep
+    // exactly the same stitch symbols/counts and only move their chart cells,
+    // so the arithmetic remains valid while the piece finally reads as a
+    // sweater or vest rather than a centred trapezium.
+    const neckDepth = name === "front" ? fit!.frontNeckDepthCm : fit!.backNeckDepthCm;
+    const neckStart = Math.max(0, h - ctx.rowCount(neckDepth));
+    const upperWidth = Math.min(w, Math.max(4, ctx.sts(fit!.upperBackCm)));
+    rows = rows.map((row, r) => {
+      if (r < neckStart) return row;
+      const worked = row.filter((cell) => cell.symbolId !== NO_STITCH_ID);
+      const availableGap = Math.max(0, upperWidth - worked.length);
+      const neckGap = Math.min(availableGap, Math.max(2, ctx.sts(fit!.neckWidthCm)));
+      if (neckGap < 2) return row;
+      const left = Math.ceil(worked.length / 2);
+      const right = worked.length - left;
+      const boundStart = Math.floor((w - upperWidth) / 2);
+      const positions = [
+        ...Array.from({ length: left }, (_, i) => boundStart + i),
+        ...Array.from({ length: right }, (_, i) => boundStart + upperWidth - right + i),
+      ];
+      return placeWorkedCells(row, worked, positions);
+    });
+  }
   return { ...chart, rows };
+}
+
+function placeWorkedCells(row: readonly ChartCell[], worked: readonly ChartCell[], positions: readonly number[]): ChartCell[] {
+  const next: ChartCell[] = row.map(() => ({ symbolId: NO_STITCH_ID, colorIndex: 0 }));
+  positions.forEach((position, index) => {
+    const cell = worked[index];
+    if (position >= 0 && position < next.length && cell) next[position] = { ...cell };
+  });
+  return next;
 }

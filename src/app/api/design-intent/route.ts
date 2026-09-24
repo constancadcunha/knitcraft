@@ -17,6 +17,11 @@ interface Body {
   imageBase64?: string;
 }
 
+/** Lets the Studio explain whether cloud design is available before a request. */
+export function GET() {
+  return Response.json({ configured: Boolean(process.env.OPENROUTER_API_KEY) });
+}
+
 export async function POST(request: Request) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {

@@ -12,6 +12,7 @@ import type { Pattern } from "@/types";
 import { describeTool, type EstimatedGauge } from "./needleGauge";
 import { lessonHref, stitchesToLearn } from "./stitchLessons";
 import type { YarnCraft } from "@/types";
+import { GarmentIcon } from "@/components/GarmentIcon";
 
 export interface ReviewData {
   craft: YarnCraft;
@@ -166,9 +167,19 @@ export default function ReviewStep({ data }: { data: ReviewData }) {
       </div>
 
       {data.pieces[0] && (
-        <Panel title={`Preview — ${data.pieces[0].panel.name}`} accent="fern">
-          <div className="overflow-x-auto">
-            <ChartView chart={data.pieces[0].chart} cellSize={14} showRowNumbers={false} />
+        <Panel title={`${data.pattern.garmentType} blueprint`} accent="fern">
+          <div className="grid gap-5 md:grid-cols-[10rem_minmax(0,1fr)] md:items-center">
+            <div className="flex flex-col items-center border-[3px] border-ink bg-panel-sunk p-4 text-center">
+              <GarmentIcon type={data.pattern.garmentType} active className="h-28 w-28" />
+              <p className="label mt-2 text-ink">Finished garment</p>
+            </div>
+            <div>
+              <p className="label mb-2 text-ink-faint">First piece · {data.pieces[0].panel.name}</p>
+              <div className="chart-fit max-h-80">
+                <ChartView chart={data.pieces[0].chart} cellSize={10} showRowNumbers={false} />
+              </div>
+              <p className="mt-3 text-sm text-ink-soft">The heavy outline follows only real stitches. Blank cells outside it are not part of the garment.</p>
+            </div>
           </div>
         </Panel>
       )}

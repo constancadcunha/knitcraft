@@ -21,6 +21,7 @@ describe("ChartView", () => {
     const html = renderToStaticMarkup(<ChartView chart={cableChart()} />);
     expect(html).toContain("<svg");
     expect(html).toContain('shape-rendering="crispEdges"');
+    expect(html).toContain("<clipPath");
   });
 
   it("draws a 2/2 cable as ONE glyph four cells wide, not four half-cables", () => {
