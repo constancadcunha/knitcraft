@@ -26,7 +26,8 @@ import {
  *  3. The server snapshot is always empty, so there is no hydration mismatch:
  *     the server cannot know what is in the browser.
  *
- * Everything stays on the device. There is no backend and no network call here.
+ * Local storage provides a fast browser copy while the workspace API keeps a
+ * private server-side copy that can be recovered on another device.
  */
 
 export interface StoreSnapshot {

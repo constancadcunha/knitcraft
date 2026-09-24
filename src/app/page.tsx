@@ -49,8 +49,8 @@ const PROMISES = [
     body: "Say “one” to tally a stitch, “next row” to advance, “where am I” to hear your place. Your hands never leave the needles.",
   },
   {
-    title: "Stays on your machine",
-    body: "Every project lives in this browser. No account, no upload, nothing sent anywhere.",
+    title: "Private by default",
+    body: "No sign-up or email address. A private recovery code keeps your projects available across your devices.",
   },
 ];
 
@@ -92,7 +92,7 @@ export default function HomePage() {
 
           <p className="mt-6 flex flex-wrap items-center gap-x-3 gap-y-2 text-tiny text-ink-faint">
             <span className="inline-block h-2 w-2 bg-fern" aria-hidden />
-            No account. No upload. Works offline once loaded.
+            No sign-up. Private recovery code. Your work saves as you go.
           </p>
         </div>
 

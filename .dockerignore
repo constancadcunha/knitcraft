@@ -1,0 +1,10 @@
+.git
+.github
+.next
+node_modules
+data
+out
+coverage
+.env*
+npm-debug.log*
+Revamp KnitCraft AI Design

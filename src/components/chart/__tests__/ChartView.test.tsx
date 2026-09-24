@@ -66,6 +66,9 @@ describe("ChartView", () => {
       <ChartView chart={chart} completed={{ "0,0": true }} />
     );
     expect(marked).not.toEqual(plain);
-    expect(marked).toContain("0.3");
+    expect(marked).toContain('opacity="0.55"');
+    // Completed cells also receive a visible tick, so progress is not
+    // communicated by opacity alone.
+    expect(marked).toContain("<path");
   });
 });
