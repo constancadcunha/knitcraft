@@ -50,7 +50,7 @@ The simplest GitHub-connected deployment is Railway:
 
 1. Push the branch you want to publish to `https://github.com/constancadcunha/knitcraft`.
 2. In Railway, choose **New Project → Deploy from GitHub repo**, select `knitcraft`, and select the production branch.
-3. Railway will detect the included `Dockerfile`; no custom build or start command is needed.
+3. Railway reads `railway.json` and uses the included `Dockerfile`; no custom build or start command is needed.
 4. Add a Railway volume mounted at `/app/data`. This is required so projects survive restarts and redeploys.
 5. Add `OPENROUTER_API_KEY` under **Variables** if cloud-assisted drafting is wanted. The rest of the app works without it.
 6. Set the health-check path to `/api/health`, generate a public domain, and deploy.
