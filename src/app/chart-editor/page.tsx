@@ -6,7 +6,7 @@ import { useStore } from "@/lib/store";
 import { draftGarment } from "@/lib/garments";
 import { createProject, createSavedChart } from "@/lib/project/factory";
 import { createChartProgress } from "@/lib/project/progress";
-import { clearAt, placeSymbol, setColor, type SymbolChart } from "@/lib/chart";
+import { clearAt, NO_STITCH_ID, placeSymbol, setColor, type SymbolChart } from "@/lib/chart";
 import ChartView from "@/components/chart/ChartView";
 import ChartLegend from "@/components/chart/ChartLegend";
 import SymbolPalette from "@/components/chart/SymbolPalette";
@@ -322,7 +322,7 @@ export default function ChartEditorPage() {
 
         <div className="space-y-5">
           <Panel
-            title="Pieces"
+            title={`${garment} blueprint`}
             accent="grape"
             action={
               <Tag tone="neutral">
@@ -330,23 +330,41 @@ export default function ChartEditorPage() {
               </Tag>
             }
           >
-            <ul className="flex flex-wrap gap-2">
-              {draft.pieces.map((p, i) => (
-                <li key={p.chart.id}>
-                  <Button
-                    size="sm"
-                    variant={i === pieceIndex ? "primary" : "secondary"}
-                    aria-pressed={i === pieceIndex}
-                    onClick={() => setPieceIndex(i)}
-                  >
-                    {i === pieceIndex && (
-                      <span className="h-2 w-2 bg-panel" aria-hidden />
-                    )}
-                    {p.panel.name}
-                  </Button>
-                </li>
-              ))}
-            </ul>
+            <div className="grid gap-5 md:grid-cols-[11rem_minmax(0,1fr)]">
+              <div className="flex flex-col items-center justify-center border-[3px] border-ink bg-panel-sunk p-4 text-center">
+                <GarmentIcon type={garment} active className="h-28 w-28" />
+                <p className="label mt-3 text-ink">Finished silhouette</p>
+                <p className="mt-1 text-tiny text-ink-faint">{assemblyHint(garment)}</p>
+              </div>
+              <div>
+                <p className="mb-2 text-sm text-ink-soft">
+                  A garment is charted as the pieces you actually make. Choose a shaped piece to edit it.
+                </p>
+                <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {draft.pieces.map((p, i) => {
+                    const active = i === pieceIndex;
+                    return (
+                      <li key={p.chart.id}>
+                        <button
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => setPieceIndex(i)}
+                          className={cn(
+                            "flex h-full w-full flex-col items-center gap-2 border-[3px] border-ink p-2 text-center transition-transform",
+                            active
+                              ? "bg-gold shadow-pop-sm"
+                              : "bg-panel hover:-translate-y-0.5 hover:shadow-pop-sm"
+                          )}
+                        >
+                          <PieceShape chart={p.chart} active={active} />
+                          <span className="label text-ink">{p.panel.name}</span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            </div>
             {piece && (
               <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t-[3px] border-ink/10 pt-4 sm:grid-cols-4">
                 <Fact label="Stitches" value={piece.panel.stitches} />
@@ -444,4 +462,48 @@ function Fact({ label, value }: { label: string; value: ReactNode }) {
       <dd className="mt-1 text-sm text-ink">{value}</dd>
     </div>
   );
+}
+
+function PieceShape({ chart, active }: { chart: SymbolChart; active: boolean }) {
+  const path = useMemo(() => {
+    const runs: string[] = [];
+    for (let row = 0; row < chart.height; row += 1) {
+      let start = -1;
+      for (let col = 0; col <= chart.width; col += 1) {
+        const worked = col < chart.width && chart.rows[row]?.[col]?.symbolId !== NO_STITCH_ID;
+        if (worked && start < 0) start = col;
+        if (!worked && start >= 0) {
+          const y = chart.height - 1 - row;
+          runs.push(`M${start} ${y}h${col - start}v1h-${col - start}Z`);
+          start = -1;
+        }
+      }
+    }
+    return runs.join("");
+  }, [chart]);
+
+  return (
+    <svg
+      viewBox={`0 0 ${chart.width} ${chart.height}`}
+      className="h-16 w-full"
+      preserveAspectRatio="xMidYMid meet"
+      aria-hidden="true"
+    >
+      <path
+        d={path}
+        fill={active ? "var(--color-berry)" : "var(--color-grape)"}
+        stroke="var(--color-ink)"
+        strokeWidth={Math.max(0.6, Math.min(chart.width, chart.height) / 45)}
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
+  );
+}
+
+function assemblyHint(garment: GarmentType): string {
+  if (garment === "Cardigan") return "Two fronts, back and sleeves meet around an open button band.";
+  if (["Sweater", "Vest", "Tank Top"].includes(garment)) return "Front and back shape the neckline; sleeves join at the armholes.";
+  if (["Socks", "Mittens", "Gloves", "Leg Warmers"].includes(garment)) return "Matching shaped sections form the pair.";
+  if (garment === "Tote Bag") return "Front, back, base and straps assemble into the finished bag.";
+  return "Each chart follows the real outline and dimensions of its worked section.";
 }

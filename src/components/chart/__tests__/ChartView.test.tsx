@@ -21,6 +21,7 @@ describe("ChartView", () => {
     const html = renderToStaticMarkup(<ChartView chart={cableChart()} />);
     expect(html).toContain("<svg");
     expect(html).toContain('shape-rendering="crispEdges"');
+    expect(html).toContain("<clipPath");
   });
 
   it("draws a 2/2 cable as ONE glyph four cells wide, not four half-cables", () => {
@@ -66,6 +67,9 @@ describe("ChartView", () => {
       <ChartView chart={chart} completed={{ "0,0": true }} />
     );
     expect(marked).not.toEqual(plain);
-    expect(marked).toContain("0.3");
+    expect(marked).toContain('opacity="0.55"');
+    // Completed cells also receive a visible tick, so progress is not
+    // communicated by opacity alone.
+    expect(marked).toContain("<path");
   });
 });

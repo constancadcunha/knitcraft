@@ -272,7 +272,7 @@ Return exactly this JSON shape:
 {
   "name": string,                 // an evocative pattern name, 2-4 words
   "motifKind": "colourwork" | "cable" | "lace" | "texture" | "plain",
-  "motifGrid": [string],          // for pictorial colourwork: a 24x24 pixel drawing of the requested object, top row first, digits indexing palette; 0 background. Draw the actual subject (e.g. lobster claws, tail and body), not stripes or alternating checks. Omit for plain/textured fabric.
+  "motifGrid": [string],          // only for pictorial colourwork: exactly 16 strings of 16 digits, top row first, digits indexing palette; 0 background. Omit for cables, lace, texture or plain fabric.
   "motifDescription": string,     // what the motif looks like, one sentence
   "palette": [                    // 2-5 entries, ordered main colour first
     { "role": string, "hex": "#rrggbb", "name": string }
@@ -331,7 +331,11 @@ export async function generateDesignIntent(input: {
     apiKey: input.apiKey,
     messages,
     hasImage: Boolean(input.imageBase64),
-    maxTokens: 1800,
+    // Reasoning-capable free models spend part of this allowance before they
+    // emit JSON. 1,800 repeatedly truncated otherwise valid colourwork grids;
+    // 3,000 still bounds cost while leaving enough room for the compact 16x16
+    // motif and the design fields.
+    maxTokens: 3000,
   });
 
   if (!outcome.ok || outcome.value === undefined) {

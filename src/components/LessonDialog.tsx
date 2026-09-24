@@ -7,6 +7,7 @@ import { DIFFICULTY_LABELS, type LearnEntry } from "@/lib/learn/types";
 import type { LessonArtwork } from "@/lib/learn/artworkFor";
 import { Button } from "@/components/ui/Button";
 import { Tag } from "@/components/ui/Bits";
+import { lessonById } from "@/lib/learn/content";
 
 /**
  * A lesson opened as a dialog rather than expanded in place.
@@ -20,11 +21,13 @@ export default function LessonDialog({
   photo,
   artwork,
   onClose,
+  onSelectLesson,
 }: {
   lesson: LearnEntry | null;
   photo?: PhotoCredit;
   artwork: LessonArtwork | null;
   onClose: () => void;
+  onSelectLesson?: (lesson: LearnEntry) => void;
 }) {
   const external = lesson ? sourcedDiagram(lesson) : null;
   const ref = useRef<HTMLDialogElement>(null);
@@ -39,6 +42,8 @@ export default function LessonDialog({
   const videoQuery = lesson
     ? `how to ${lesson.name} ${lesson.craft === "crocheting" ? "crochet" : lesson.craft === "cross-stitch" ? "cross stitch" : "knitting"}`
     : "";
+  const prerequisites = lesson?.prerequisites.map(lessonById).filter((item): item is LearnEntry => !!item) ?? [];
+  const related = lesson?.related.map(lessonById).filter((item): item is LearnEntry => !!item) ?? [];
 
   return (
     <dialog
@@ -70,6 +75,27 @@ export default function LessonDialog({
 
           <div className="space-y-5 p-5">
             <p className="text-base text-ink">{lesson.summary}</p>
+
+            {prerequisites.length > 0 && (
+              <div className="border-[3px] border-ink bg-panel-sunk p-3">
+                <h3 className="label text-ink-faint">Helpful first</h3>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {prerequisites.map((item) => (
+                    <button key={item.id} type="button" className="press bg-panel px-3 py-2 text-sm text-ink hover:bg-gold" onClick={() => onSelectLesson?.(item)}>
+                      {item.name} →
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {lesson.terminology && (
+              <div className="border-[3px] border-rust bg-panel p-4">
+                <h3 className="label text-rust">US / UK terminology</h3>
+                <p className="mt-2 text-sm text-ink"><strong>US:</strong> {lesson.terminology.us} · <strong>UK:</strong> {lesson.terminology.uk}</p>
+                <p className="mt-1.5 text-sm text-ink-soft">{lesson.terminology.consequence}</p>
+              </div>
+            )}
 
             {photo && (
               <figure>
@@ -133,6 +159,32 @@ export default function LessonDialog({
               <div>
                 <h3 className="label mb-1 text-ink-faint">Use it for</h3>
                 <p className="text-sm text-ink">{lesson.useFor}</p>
+              </div>
+            )}
+
+            {lesson.fabric && (
+              <div>
+                <h3 className="label mb-2 text-ink-faint">Fabric behaviour</h3>
+                <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {lesson.fabric.multiple && <Fact label="Multiple" value={lesson.fabric.multiple} />}
+                  {lesson.fabric.rowRepeat && <Fact label="Row repeat" value={String(lesson.fabric.rowRepeat)} />}
+                  {lesson.fabric.stretch && <Fact label="Stretch" value={lesson.fabric.stretch} />}
+                  {lesson.fabric.reversible !== undefined && <Fact label="Reversible" value={lesson.fabric.reversible ? "Yes" : "No"} />}
+                  {lesson.fabric.curls !== undefined && <Fact label="Curls" value={lesson.fabric.curls ? "Yes — add a border" : "No"} />}
+                </dl>
+              </div>
+            )}
+
+            {lesson.table && (
+              <div>
+                <h3 className="label mb-2 text-ink-faint">{lesson.table.caption}</h3>
+                <div className="overflow-x-auto border-[3px] border-ink">
+                  <table className="w-full border-collapse text-left text-sm">
+                    <thead className="bg-gold"><tr>{lesson.table.columns.map((column) => <th key={column} className="border-b-[3px] border-ink px-3 py-2 label">{column}</th>)}</tr></thead>
+                    <tbody>{lesson.table.rows.map((row, rowIndex) => <tr key={rowIndex} className="border-b border-ink/20 last:border-0">{row.map((cell, cellIndex) => <td key={`${rowIndex}-${cellIndex}`} className="px-3 py-2">{cell}</td>)}</tr>)}</tbody>
+                  </table>
+                </div>
+                <p className="mt-1.5 text-tiny text-ink-faint">Source: {lesson.table.source}</p>
               </div>
             )}
 
@@ -201,9 +253,31 @@ export default function LessonDialog({
                 ))}
               </div>
             )}
+
+            {related.length > 0 && (
+              <div className="border-t-[3px] border-ink pt-4">
+                <h3 className="label mb-2 text-ink-faint">Learn next</h3>
+                <div className="flex flex-wrap gap-2">
+                  {related.map((item) => (
+                    <button key={item.id} type="button" className="press bg-panel px-3 py-2 text-sm text-ink hover:bg-gold" onClick={() => onSelectLesson?.(item)}>
+                      {item.name} →
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
     </dialog>
+  );
+}
+
+function Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="border-[3px] border-ink bg-panel-sunk p-3">
+      <dt className="label text-ink-faint">{label}</dt>
+      <dd className="mt-1 capitalize text-sm text-ink">{value}</dd>
+    </div>
   );
 }
